@@ -1,112 +1,181 @@
 --!strict
+
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local Players = game:GetService("Players")
 
 local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
+local UIClient = require(script.Parent:WaitForChild("UIClient"))
 local CameraClient = require(script.Parent:WaitForChild("CameraClient"))
 
 local InputClient = {}
 
 local firing = false
 local lastFireSent = 0
+local ultimateRequested = false
+local lastSwitchTime = 0
+local inputDebounce = 0.15
 
 local function sendFire()
-    local camera = workspace.CurrentCamera
-    if not camera then return end
-    ClientCore.Fire("RequestFire", {
-        origin = camera.CFrame.Position,
-        direction = camera.CFrame.LookVector,
-        clientTime = os.clock(),
-    })
+	local camera = workspace.CurrentCamera
+	if not camera then return end
+	ClientCore.Fire("RequestFire", {
+		origin = camera.CFrame.Position,
+		direction = camera.CFrame.LookVector,
+		clientTime = os.clock(),
+	})
+end
+
+local function isChatFocused()
+	-- Check if any UI element has keyboard focus
+	local guiService = game:GetService("GuiService")
+	return guiService:IsFocused()
 end
 
 function InputClient.Init()
-    if UserInputService.TouchEnabled then
-        local playerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
-        local gui = playerGui:WaitForChild("PulseDeckArenaGui")
-        local hud = gui:WaitForChild("HUD")
+	-- Mobile touch controls
+	if UserInputService.TouchEnabled then
+		local playerGui = Players.LocalPlayer:WaitForChild("PlayerGui")
+		local gui = playerGui:WaitForChild("PulseDeckArenaGui")
+		local hud = gui:WaitForChild("HUD")
 
-        local function mobileButton(text: string, position: UDim2, color: Color3)
-            local button = Instance.new("TextButton")
-            button.Text = text
-            button.Size = UDim2.new(0, 92, 0, 92)
-            button.Position = position
-            button.BackgroundColor3 = color
-            button.TextColor3 = Color3.fromRGB(255, 255, 255)
-            button.Font = Enum.Font.GothamBlack
-            button.TextScaled = true
-            button.Parent = hud
-            return button
-        end
+		local function mobileButton(text, position, color, size)
+			local button = Instance.new("TextButton")
+			button.Text = text
+			button.Size = size or UDim2.new(0, 92, 0, 92)
+			button.Position = position
+			button.BackgroundColor3 = color
+			button.TextColor3 = Color3.fromRGB(255, 255, 255)
+			button.Font = Enum.Font.GothamBlack
+			button.TextSize = 18
+			button.TextScaled = true
+			button.Parent = hud
 
-        local fireButton = mobileButton("FIRE", UDim2.new(1, -112, 1, -164), Color3.fromRGB(210, 55, 55))
-        fireButton.MouseButton1Down:Connect(function()
-            firing = true
-            sendFire()
-        end)
-        fireButton.MouseButton1Up:Connect(function()
-            firing = false
-        end)
+			local corner = Instance.new("UICorner")
+			corner.CornerRadius = UDim.new(0, 12)
+			corner.Parent = button
 
-        local abilityButton = mobileButton("ABILITY", UDim2.new(1, -214, 1, -164), Color3.fromRGB(60, 120, 230))
-        abilityButton.MouseButton1Click:Connect(function()
-            local camera = workspace.CurrentCamera
-            ClientCore.Fire("RequestAbility", { direction = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1) })
-        end)
+			local stroke = Instance.new("UIStroke")
+			stroke.Color = Color3.fromRGB(255, 255, 255, 80)
+			stroke.Thickness = 1.5
+			stroke.Parent = button
 
-        local reloadButton = mobileButton("RELOAD", UDim2.new(1, -112, 1, -266), Color3.fromRGB(90, 90, 130))
-        reloadButton.MouseButton1Click:Connect(function()
-            ClientCore.Fire("RequestReload", {})
-        end)
+			return button
+		end
 
-        local cameraButton = mobileButton("CAM", UDim2.new(1, -214, 1, -266), Color3.fromRGB(80, 170, 150))
-        cameraButton.MouseButton1Click:Connect(function()
-            CameraClient.ToggleMode()
-        end)
-    end
+		-- Fire button
+		local fireButton = mobileButton("🔥 FIRE", UDim2.new(0, -110, 1, -164),
+			Color3.fromRGB(210, 55, 55), UDim2.new(0, 92, 0, 72))
+		fireButton.MouseButton1Down:Connect(function()
+			firing = true
+			sendFire()
+		end)
+		fireButton.MouseButton1Up:Connect(function()
+			firing = false
+		end)
 
-    UserInputService.InputBegan:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            firing = true
-            sendFire()
-        elseif input.KeyCode == Enum.KeyCode.R then
-            ClientCore.Fire("RequestReload", {})
-        elseif input.KeyCode == Enum.KeyCode.Q then
-            local camera = workspace.CurrentCamera
-            ClientCore.Fire("RequestAbility", {
-                direction = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1),
-            })
-        elseif input.KeyCode == Enum.KeyCode.One then
-            ClientCore.Fire("RequestSwitchHero", { slot = 1 })
-        elseif input.KeyCode == Enum.KeyCode.Two then
-            ClientCore.Fire("RequestSwitchHero", { slot = 2 })
-        elseif input.KeyCode == Enum.KeyCode.Three then
-            ClientCore.Fire("RequestSwitchHero", { slot = 3 })
-        elseif input.KeyCode == Enum.KeyCode.Four then
-            ClientCore.Fire("RequestSwitchHero", { slot = 4 })
-        elseif input.KeyCode == Enum.KeyCode.Five then
-            ClientCore.Fire("RequestSwitchHero", { slot = 5 })
-        elseif input.KeyCode == Enum.KeyCode.V then
-            CameraClient.ToggleMode()
-        elseif input.KeyCode == Enum.KeyCode.Tab then
-            ClientCore.Fire("RequestScoreboard", {})
-        end
-    end)
+		-- Ability button
+		local abilityButton = mobileButton("⚡ [Q]", UDim2.new(0, -214, 1, -90),
+			Color3.fromRGB(60, 120, 230), UDim2.new(0, 92, 0, 68))
+		abilityButton.MouseButton1Click:Connect(function()
+			local camera = workspace.CurrentCamera
+			ClientCore.Fire("RequestAbility", {
+				direction = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1)
+			})
+		end)
 
-    UserInputService.InputEnded:Connect(function(input, gameProcessed)
-        if gameProcessed then return end
-        if input.UserInputType == Enum.UserInputType.MouseButton1 then
-            firing = false
-        end
-    end)
+		-- Ultimate button
+		local ultimateButton = mobileButton("💀 [E]", UDim2.new(0, -118, 1, -266),
+			Color3.fromRGB(160, 40, 200), UDim2.new(0, 92, 0, 68))
+		ultimateButton.MouseButton1Click:Connect(function()
+			ClientCore.Fire("RequestUltimate", {})
+		end)
 
-    RunService.RenderStepped:Connect(function()
-        if firing and os.clock() - lastFireSent >= 0.06 then
-            lastFireSent = os.clock()
-            sendFire()
-        end
-    end)
+		-- Reload button
+		local reloadButton = mobileButton("🔄 [R]", UDim2.new(0, -112, 1, -360),
+			Color3.fromRGB(90, 90, 130), UDim2.new(0, 92, 0, 68))
+		reloadButton.MouseButton1Click:Connect(function()
+			ClientCore.Fire("RequestReload", {})
+		end)
+
+		-- Camera mode toggle
+		local camButton = mobileButton("📷", UDim2.new(0, -214, 1, -360),
+			Color3.fromRGB(80, 170, 150), UDim2.new(0, 92, 0, 68))
+		camButton.MouseButton1Click:Connect(function()
+			CameraClient.ToggleMode()
+		end)
+
+		-- Hero switch buttons (1-5)
+		for i = 1, 5 do
+			local btn = mobileButton(tostring(i),
+				UDim2.new(0, -370 + (i-1) * 60, 1, -164),
+				Color3.fromRGB(40, 44, 60), UDim2.new(0, 52, 0, 52))
+			btn.TextSize = 22
+			btn.MouseButton1Click:Connect(function()
+				ClientCore.Fire("RequestSwitchHero", { slot = i })
+			end)
+		end
+	end
+
+	-- Keyboard & mouse input
+	UserInputService.InputBegan:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if isChatFocused() then return end
+
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			firing = true
+			sendFire()
+		elseif input.KeyCode == Enum.KeyCode.R then
+			ClientCore.Fire("RequestReload", {})
+		elseif input.KeyCode == Enum.KeyCode.Q then
+			local camera = workspace.CurrentCamera
+			ClientCore.Fire("RequestAbility", {
+				direction = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1),
+			})
+		elseif input.KeyCode == Enum.KeyCode.E then
+			-- Ultimate ability
+			local currentTime = os.clock()
+			if currentTime - ultimateRequested > 1.0 then
+				ultimateRequested = currentTime
+				ClientCore.Fire("RequestUltimate", {})
+			end
+		elseif input.KeyCode == Enum.KeyCode.One then
+			ClientCore.Fire("RequestSwitchHero", { slot = 1 })
+		elseif input.KeyCode == Enum.KeyCode.Two then
+			ClientCore.Fire("RequestSwitchHero", { slot = 2 })
+		elseif input.KeyCode == Enum.KeyCode.Three then
+			ClientCore.Fire("RequestSwitchHero", { slot = 3 })
+		elseif input.KeyCode == Enum.KeyCode.Four then
+			ClientCore.Fire("RequestSwitchHero", { slot = 4 })
+		elseif input.KeyCode == Enum.KeyCode.Five then
+			ClientCore.Fire("RequestSwitchHero", { slot = 5 })
+		elseif input.KeyCode == Enum.KeyCode.V then
+			CameraClient.ToggleMode()
+		elseif input.KeyCode == Enum.KeyCode.Tab then
+			ClientCore.Fire("RequestScoreboard", {})
+		elseif input.KeyCode == Enum.KeyCode.P then
+			-- Pause menu (basic)
+			if UIClient.ShowPauseMenu then
+				UIClient:ShowPauseMenu()
+			end
+		end
+	end)
+
+	UserInputService.InputEnded:Connect(function(input, gameProcessed)
+		if gameProcessed then return end
+		if input.UserInputType == Enum.UserInputType.MouseButton1 then
+			firing = false
+		end
+	end)
+
+	-- Continuous firing
+	RunService.RenderStepped:Connect(function()
+		if firing and os.clock() - lastFireSent >= 0.05 then
+			lastFireSent = os.clock()
+			sendFire()
+		end
+	end)
 end
 
 return InputClient
