@@ -161,10 +161,20 @@ requestUltimate.OnServerEvent:Connect(function(player)
 end)
 
 requestCamera.OnServerEvent:Connect(function(_player, _payload)
-	-- Camera is client-owned.
-end)
+		-- Camera is client-owned.
+	end)
 
-requestScoreboard.OnServerEvent:Connect(function(player)
+	local requestGameMode = ensureRemote("RequestGameMode", "RemoteEvent")
+	requestGameMode.OnServerEvent:Connect(function(player, payload)
+		if MatchSystem.State == "Lobby" or MatchSystem.State == "DeckSelect" then
+			if payload and payload.mode then
+				MatchSystem.GameMode = payload.mode
+				announcementEvent:FireAllClients({text = "Game mode: " .. payload.mode, duration = 3})
+			end
+		end
+	end)
+
+	requestScoreboard.OnServerEvent:Connect(function(player)
 	local rows = {}
 	for _, plr in ipairs(Players:GetPlayers()) do
 		local teamId = MatchSystem.GetTeam(plr.UserId) or "None"

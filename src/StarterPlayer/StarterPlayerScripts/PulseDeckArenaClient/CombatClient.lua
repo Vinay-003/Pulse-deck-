@@ -702,6 +702,37 @@ function CombatClient.Init()
 			CombatClient.RenderTimeDilation(payload.position, payload.radius, payload.duration, payload.color)
 		elseif payload.effectType == "GravityWellPulse" then
 			CombatClient.RenderGravityWellPulse(payload.position, payload.radius, payload.color)
+		elseif payload.effectType == "TrackerMark" then
+			-- Target marked indicator (reuses objective hit visual)
+			CombatClient.RenderObjectiveHit(payload.position, 0)
+
+		elseif payload.effectType == "MineDeployed" then
+			-- Small pulsing indicator for mine placement
+			local mine = Instance.new("Part")
+			mine.Name = "SmartMineIndicator"
+			mine.Size = Vector3.new(1.5, 0.2, 1.5)
+			mine.Position = payload.position
+			mine.Color = Color3.fromRGB(255, 50, 50)
+			mine.Material = Enum.Material.Neon
+			mine.Transparency = 0.5
+			mine.Anchored = true
+			mine.CanCollide = false
+			mine.Parent = workspace
+			Debris:AddItem(mine, payload.duration or 30)
+
+		elseif payload.effectType == "EnergyShield" then
+			local shield = Instance.new("Part")
+			shield.Name = "EnergyShield"
+			shield.Size = Vector3.new((payload.width or 5), (payload.height or 6), 0.3)
+			shield.Position = payload.position
+			shield.Color = payload.color or Color3.fromRGB(100, 200, 255)
+			shield.Material = Enum.Material.ForceField
+			shield.Transparency = 0.4
+			shield.Anchored = true
+			shield.CanCollide = false
+			shield.Parent = workspace
+			Debris:AddItem(shield, payload.duration or 5)
+
 		elseif payload.effectType == "Trail" then
 			CombatClient.RenderTrail(payload.startPosition, payload.endPosition, payload.color, payload.duration)
 		end
@@ -718,9 +749,10 @@ function CombatClient.Init()
 	end)
 
 	killfeedEvent.OnClientEvent:Connect(function(payload)
-		-- Use UIClient's killfeed if available
-		if UIClient and UIClient.Events and UIClient.Events.Killfeed then
-			UIClient:OnKillfeed(payload)
+		-- Dispatch killfeed through ClientCore event system
+		local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
+		if ClientCore and ClientCore.Events and ClientCore.Events.Killfeed then
+			ClientCore.Events.Killfeed:Fire(payload)
 		end
 	end)
 

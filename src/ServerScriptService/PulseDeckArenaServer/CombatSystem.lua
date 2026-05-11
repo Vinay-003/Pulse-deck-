@@ -158,6 +158,8 @@ function CombatSystem.DamageObjective(model, amount, teamId)
 	if not obj then return end
 	if teamId == obj.TeamId then return end
 
+	local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
+
 	local adjusted = amount
 	if obj.Name == "Core" then
 		local gens = 0
@@ -172,7 +174,7 @@ function CombatSystem.DamageObjective(model, amount, teamId)
 		end
 
 		local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
-		MatchSystem.RecordCoreDamage(teamId, adjusted)
+	MatchSystem.RecordCoreDamage(teamId, adjusted)
 	end
 
 	obj.Health = math.max(0, obj.Health - adjusted)
@@ -188,7 +190,6 @@ function CombatSystem.DamageObjective(model, amount, teamId)
 		)
 	end
 
-	local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
 	MatchSystem.AddScore(teamId, adjusted)
 
 	fireEffect({

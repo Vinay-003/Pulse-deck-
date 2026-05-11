@@ -18,6 +18,7 @@ AbilitySystem.SlowFields = {}
 AbilitySystem.Sentries = {}
 AbilitySystem.GravityWells = {}
 AbilitySystem.EnergyShields = {}
+AbilitySystem.ActiveHealingFields = {}
 
 local function getEffectsFolder()
 	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
@@ -71,6 +72,7 @@ function AbilitySystem.Clear()
 	AbilitySystem.Sentries = {}
 	AbilitySystem.GravityWells = {}
 	AbilitySystem.EnergyShields = {}
+	AbilitySystem.ActiveHealingFields = {}
 	local effects = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Effects")
 	if effects then
 		effects:ClearAllChildren()
@@ -391,8 +393,6 @@ function AbilitySystem.UseAbility(hero, payload)
 		mine.Anchored = true
 		mine.CanCollide = false
 		mine.Parent = getEffectsFolder()
-		mine:SetAttribute("Armed", false)
-		mine:SetAttribute("TeamId", hero.TeamId)
 
 		local data = {
 			Part = mine,
@@ -404,6 +404,21 @@ function AbilitySystem.UseAbility(hero, payload)
 			Damage = cfg.damage,
 			SplashRadius = cfg.splashRadius or 8,
 		}
+
+		mine.Touched:Connect(function(hit)
+			if not mine or not mine.Parent then return end
+			if hit and hit.Parent then
+				local hitHero = AbilitySystem.HeroSystem.GetHeroFromPart(hit)
+				if hitHero and hitHero.TeamId ~= data.TeamId then
+					AbilitySystem.CombatSystem.ApplyDamage(data.OwnerHero, hitHero, data.Damage)
+				end
+			end
+			if mine and mine.Parent then
+				mine:Destroy()
+				AbilitySystem.DamageRadius(data.OwnerHero, data.Part.Position, data.SplashRadius, data.Damage, 0.5)
+				effectAll({effectType = "Explosion", position = data.Part.Position, radius = data.SplashRadius, duration = 0.4})
+			end
+		end)
 		table.insert(hero.Mines, data)
 		table.insert(AbilitySystem.ActiveMines, data)
 		effectAll({effectType = "MineDeployed", position = mine.Position})
