@@ -216,4 +216,144 @@ function Util.CreateMeshPart(name, shape, size, color, position, anchored, mater
 	return part
 end
 
+function Util.GetAlivePlayersInRadius(position, radius, ignorePlayer)
+	local Players = game:GetService("Players")
+	local alive = {}
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= ignorePlayer and plr.Character then
+			local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+			local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+			if hrp and hum and hum.Health > 0 then
+				local d = (hrp.Position - position).Magnitude
+				if d <= radius then
+					table.insert(alive, plr)
+				end
+			end
+		end
+	end
+	return alive
+end
+
+function Util.GetClosestPlayerToPoint(point, ignorePlayer)
+	local Players = game:GetService("Players")
+	local closest, minDist = nil, math.huge
+	for _, plr in ipairs(Players:GetPlayers()) do
+		if plr ~= ignorePlayer and plr.Character then
+			local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+			if hrp then
+				local hum = plr.Character:FindFirstChildOfClass("Humanoid")
+				if hum and hum.Health > 0 then
+					local d = (hrp.Position - point).Magnitude
+					if d < minDist then
+						minDist = d
+						closest = plr
+					end
+				end
+			end
+		end
+	end
+	return closest, minDist
+end
+
+function Util.CreateDamageNumber(text, position, color, duration)
+	local BillboardGui = Instance.new("BillboardGui")
+	BillboardGui.Name = "DamageNumber"
+	BillboardGui.Size = UDim2.new(2, 0, 1.2, 0)
+	BillboardGui.StudsOffset = position + Vector3.new(0, 3, 0)
+	BillboardGui.AlwaysOnTop = true
+	BillboardGui.Adornee = nil
+	BillboardGui.Parent = workspace.CurrentCamera
+
+	local TextLabel = Instance.new("TextLabel")
+	TextLabel.Name = "Label"
+	TextLabel.Size = UDim2.new(1, 0, 1, 0)
+	TextLabel.BackgroundTransparency = 1
+	TextLabel.Text = text
+	TextLabel.TextColor3 = color
+	TextLabel.TextStrokeTransparency = 0
+	TextLabel.TextStrokeColor3 = Color3.new(0, 0, 0)
+	TextLabel.Font = Enum.Font.GothamBold
+	TextLabel.TextScaled = true
+	TextLabel.Parent = BillboardGui
+
+	local TweenService = game:GetService("TweenService")
+	local moveUp = TweenService:Create(TextLabel, TweenInfo.new(duration or 1, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		StudsOffsetWorldSpace = Vector3.new(0, 2, 0),
+	})
+	local fadeOut = TweenService:Create(TextLabel, TweenInfo.new(duration or 1, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		TextTransparency = 1,
+		TextStrokeTransparency = 1,
+	})
+	moveUp:Play()
+	fadeOut:Play()
+
+	if duration then
+		task.delay(duration, function()
+			if BillboardGui then BillboardGui:Destroy() end
+		end)
+	end
+	return BillboardGui
+end
+
+function Util.DistributedRandom(table)
+	local total = 0
+	for _, weight in pairs(table) do
+		total += weight
+	end
+	local r = math.random() * total
+	local cumulative = 0
+	for key, weight in pairs(table) do
+		cumulative += weight
+		if r <= cumulative then
+			return key
+		end
+	end
+	return nil
+end
+
+function Util.FormatTime(seconds)
+	local m = math.floor(seconds / 60)
+	local s = math.floor(seconds % 60)
+	if m > 0 then
+		return string.format("%d:%02d", m, s)
+	else
+		return string.format("%d", s)
+	end
+end
+
+function Util.SpawnExplosion(position, radius, color)
+	local explosion = Instance.new("Explosion")
+	explosion.Position = position
+	explosion.BlastRadius = radius
+	explosion.BlastPressure = 0
+	explosion.DestroyJointRadiusPercent = 0
+	explosion.RobloxLocked = true
+	explosion.Parent = workspace
+	-- Visual effect
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Brightness = 2
+	light.Range = radius * 3
+	light.Parent = explosion
+	-- Decal ring
+	local ring = Instance.new("Part")
+	ring.Name = "ExplosionRing"
+	ring.Shape = Enum.PartType.Cylinder
+	ring.Size = Vector3.new(0.2, radius * 2, radius * 2)
+	ring.CFrame = CFrame.new(position) * CFrame.Angles(math.rad(90), 0, 0)
+	ring.Color = color
+	ring.Material = Enum.Material.Neon
+	ring.Anchored = true
+	ring.CanCollide = false
+	ring.Parent = workspace
+	-- Animate ring
+	local tween = game:GetService("TweenService"):Create(ring, TweenInfo.new(0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = Vector3.new(0.2, radius * 4, radius * 4),
+		Transparency = 1,
+	})
+	tween:Play()
+	game:GetService("Debris"):AddItem(ring, 0.5)
+	game:GetService("Debris"):AddItem(explosion, 0.1)
+end
+
 return Util
