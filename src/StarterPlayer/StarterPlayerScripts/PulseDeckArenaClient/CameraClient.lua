@@ -3,12 +3,57 @@
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Lighting = game:GetService("Lighting")
+local UserInputService = game:GetService("UserInputService")
+
+local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
 
 local CameraClient = {}
 
 CameraClient.Mode = "TPS"
 CameraClient.BaseZoom = nil
 CameraClient.CameraEffects = {}
+
+CameraClient.Spectating = false
+CameraClient.SpectateTarget = nil
+CameraClient.SpectateIndex = 1
+CameraClient.SpectateMode = "ThirdPerson"
+
+function CameraClient.EnterSpectate()
+	CameraClient.Spectating = true
+	CameraClient.SpectateIndex = 1
+	CameraClient.SpectateMode = "ThirdPerson"
+	CameraClient.FindNextSpectateTarget()
+end
+
+function CameraClient.ExitSpectate()
+	CameraClient.Spectating = false
+	CameraClient.SpectateTarget = nil
+end
+
+function CameraClient.FindNextSpectateTarget()
+	local heroes = ClientCore.State.heroes or {}
+	local aliveHeroes = {}
+	for _, h in pairs(heroes) do
+		if h.teamId == ClientCore.State.teamId and h.alive then
+			table.insert(aliveHeroes, h)
+		end
+	end
+	if #aliveHeroes == 0 then
+		CameraClient.SpectateTarget = nil
+		return
+	end
+	CameraClient.SpectateIndex = (CameraClient.SpectateIndex % #aliveHeroes) + 1
+	local target = aliveHeroes[CameraClient.SpectateIndex]
+	CameraClient.SpectateTarget = target
+end
+
+function CameraClient.ToggleSpectateMode()
+	if CameraClient.SpectateMode == "ThirdPerson" then
+		CameraClient.SpectateMode = "FirstPerson"
+	else
+		CameraClient.SpectateMode = "ThirdPerson"
+	end
+end
 
 -- Camera shake state
 CameraClient.ShakeIntensity = 0
@@ -51,7 +96,33 @@ function CameraClient.Init()
 	aimPart.CanCollide = false
 	aimPart.Parent = workspace
 
-	RunService.RenderStepped:Connect(function()
+	RunService.RenderStepped:Connect(function(dt)
+		-- Spectator camera
+		if CameraClient.Spectating then
+			if CameraClient.SpectateTarget then
+				local targetPos = CameraClient.SpectateTarget.position or CameraClient.SpectateTarget.rootPosition or Vector3.new(0, 5, 0)
+				if CameraClient.SpectateMode == "FirstPerson" then
+					camera.CFrame = CFrame.new(targetPos + Vector3.new(0, 1.5, 0), targetPos + (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.LookVector * 10 or Vector3.new(0, 0, -10)))
+				else
+					local offset = Vector3.new(math.sin(tick() * 0.5) * 6, 4, math.cos(tick() * 0.5) * 6)
+					camera.CFrame = CFrame.new(targetPos + offset, targetPos)
+				end
+			else
+				-- Free fly
+				local speed = 30
+				local dir = Vector3.new(
+					(UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0),
+					(UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0),
+					(UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
+				)
+				if dir.Magnitude > 0 then
+					dir = dir.Unit
+					camera.CFrame = camera.CFrame + dir * speed * dt
+				end
+			end
+			return
+		end
+
 		local character = Players.LocalPlayer.Character
 		if not character then return end
 		local root = character:FindFirstChild("HumanoidRootPart")
@@ -129,6 +200,24 @@ function CameraClient.Init()
 	sunRays.Intensity = 0
 	sunRays.Spread = 0.5
 	sunRays.Parent = lighting
+
+	-- Depth of field for cinematic feel
+	local dof = Instance.new("DepthOfFieldEffect")
+	dof.FarIntensity = 0.3
+	dof.FocusDistance = 20
+	dof.InFocusRadius = 16
+	dof.NearIntensity = 0
+	dof.Parent = lighting
+
+	-- Atmopshere for fog glow
+	local atmo = Instance.new("Atmosphere")
+	atmo.Density = 0.15
+	atmo.Offset = 0.5
+	atmo.Color = Color3.fromRGB(40, 45, 60)
+	atmo.Decay = Color3.fromRGB(20, 22, 30)
+	atmo.Glare = 0.1
+	atmo.Haze = 0.5
+	atmo.Parent = lighting
 end
 
 return CameraClient

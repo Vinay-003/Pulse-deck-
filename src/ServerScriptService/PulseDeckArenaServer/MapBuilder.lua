@@ -3,12 +3,26 @@
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local CollectionService = game:GetService("CollectionService")
 local Lighting = game:GetService("Lighting")
+local Players = game:GetService("Players")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
 local Config = require(sharedRoot:WaitForChild("Config"))
 local Util = require(sharedRoot:WaitForChild("Util"))
 
 local MapBuilder = {}
+
+local function getRemotes()
+	local root = ReplicatedStorage:FindFirstChild("PulseDeckArena")
+	return root and root:FindFirstChild("Remotes")
+end
+
+local function fireEffect(payload)
+	local remotes = getRemotes()
+	local event = remotes and remotes:FindFirstChild("EffectsEvent")
+	if event and event:IsA("RemoteEvent") then
+		event:FireAllClients(payload)
+	end
+end
 
 local function getWorldFolder(name)
 	local world = workspace:WaitForChild("PulseDeckArenaWorld")
@@ -349,15 +363,273 @@ function MapBuilder.BuildNeonFoundry()
 	atmosphere.Parent = Lighting
 end
 
+local function createFlag(name, position, color)
+	local flag = Instance.new("Model")
+	flag.Name = name
+
+	local pole = Instance.new("Part")
+	pole.Name = "Pole"
+	pole.Size = Vector3.new(0.4, 10, 0.4)
+	pole.Color = Color3.fromRGB(200, 200, 200)
+	pole.Material = Enum.Material.Metal
+	pole.Anchored = true
+	pole.CanCollide = false
+	pole.Position = position
+	pole.Parent = flag
+
+	local flagPart = Instance.new("Part")
+	flagPart.Name = "Flag"
+	flagPart.Size = Vector3.new(0.1, 5, 3)
+	flagPart.Color = color
+	flagPart.Material = Enum.Material.Neon
+	flagPart.Anchored = true
+	flagPart.CanCollide = false
+	flagPart.Position = position + Vector3.new(0, 7, 0)
+	flagPart.Parent = flag
+
+	local light = Instance.new("PointLight")
+	light.Color = color
+	light.Brightness = 2
+	light.Range = 20
+	light.Parent = flagPart
+
+	flag.PrimaryPart = pole
+	flag:SetAttribute("FlagTeam", (color == Config.RED_COLOR and Config.TEAM_RED) or Config.TEAM_BLUE)
+	return flag
+end
+
 function MapBuilder.SetupGameMode(mode)
-	local effectsFolder = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Effects")
+	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
+	if not world then return end
+	local effectsFolder = world:FindFirstChild("Effects")
 
 	if mode == "KOTH" then
-		-- KOTH specific setup
+		-- KOTH: enable beacon zone visuals
+		local beacon = getWorldFolder("Map"):FindFirstChild("KOTH_Beacon")
+		if beacon then beacon.Transparency = 0.4 end
+	elseif mode == "Bomb" then
+		MapBuilder.SetupBombSites()
 	elseif mode == "CTF" then
-		-- CTF specific setup
+		-- Create CTF flags
+		local flagRed = createFlag("RedFlag", Config.MAP.CtfFlagRed, Config.RED_COLOR)
+		local flagBlue = createFlag("BlueFlag", Config.MAP.CtfFlagBlue, Config.BLUE_COLOR)
+		if effectsFolder then
+			flagRed.Parent = effectsFolder
+			flagBlue.Parent = effectsFolder
+		end
+		-- Register as objectives
+		if not CombatSystem.Objectives["RedFlag"] then
+			CombatSystem.Objectives["RedFlag"] = {
+				TeamId = Config.TEAM_RED, Name = "RedFlag", Health = 1,
+				Model = flagRed, MaxHealth = 1,
+			}
+		end
+		if not CombatSystem.Objectives["BlueFlag"] then
+			CombatSystem.Objectives["BlueFlag"] = {
+				TeamId = Config.TEAM_BLUE, Name = "BlueFlag", Health = 1,
+				Model = flagBlue, MaxHealth = 1,
+			}
+		end
 	elseif mode == "FFA" then
-		-- FFA specific setup: remove team-specific objectives
+		-- FFA: remove team-specific objectives from tracking
+		-- (cores remain but no team scoring)
+	end
+
+	-- Spawn power pickups in all modes
+	MapBuilder.AddPowerPickups()
+end
+
+function MapBuilder.SetupBombSites()
+	local mapFolder = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Map")
+	if not mapFolder then return end
+
+	for siteName, sitePos in pairs(Config.BOMB_SITES) do
+		-- Glowing site zone
+		local zone = Instance.new("Part")
+		zone.Name = "BombSite_" .. siteName
+		zone.Size = Vector3.new(12, 0.2, 12)
+		zone.Position = sitePos
+		zone.Color = Color3.fromRGB(255, 100, 50)
+		zone.Material = Enum.Material.Neon
+		zone.Transparency = 0.6
+		zone.Anchored = true
+		zone.CanCollide = false
+		zone.Parent = mapFolder
+
+		-- Corner markers
+		for _, offset in ipairs({{-5, 0, -5}, {-5, 0, 5}, {5, 0, -5}, {5, 0, 5}}) do
+			local marker = Instance.new("Part")
+			marker.Name = "BombSiteMarker_" .. siteName
+			marker.Size = Vector3.new(0.5, 0.5, 0.5)
+			marker.Position = sitePos + offset
+			marker.Color = Color3.fromRGB(255, 200, 50)
+			marker.Material = Enum.Material.Neon
+			marker.Transparency = 0.3
+			marker.Anchored = true
+			marker.CanCollide = false
+			marker.Parent = mapFolder
+		end
+
+		-- Site label
+		local label = Instance.new("BillboardGui")
+		label.Name = "SiteLabel_" .. siteName
+		label.Size = UDim2.new(0, 40, 0, 24)
+		label.StudsOffset = Vector3.new(0, 8, 0)
+		label.AlwaysOnTop = true
+		label.Adornee = zone
+		label.Parent = zone
+
+		local text = Instance.new("TextLabel")
+		text.Size = UDim2.fromScale(1, 1)
+		text.BackgroundTransparency = 1
+		text.Text = siteName
+		text.TextColor3 = Color3.fromRGB(255, 200, 50)
+		text.Font = Enum.Font.GothamBlack
+		text.TextScaled = true
+		text.Parent = label
+	end
+
+	-- CT spawn
+	local ctPos = Config.BOMB_SPAWN_CT[1]
+	if ctPos then
+		local ctZone = Instance.new("Part")
+		ctZone.Name = "CTSpawn"
+		ctZone.Size = Vector3.new(20, 0.2, 10)
+		ctZone.Position = ctPos
+		ctZone.Color = Color3.fromRGB(50, 150, 255)
+		ctZone.Material = Enum.Material.Neon
+		ctZone.Transparency = 0.7
+		ctZone.Anchored = true
+		ctZone.CanCollide = false
+		ctZone.Parent = mapFolder
+	end
+
+	-- T spawn
+	local tPos = Config.BOMB_SPAWN_T[1]
+	if tPos then
+		local tZone = Instance.new("Part")
+		tZone.Name = "TSpawn"
+		tZone.Size = Vector3.new(20, 0.2, 10)
+		tZone.Position = tPos
+		tZone.Color = Color3.fromRGB(255, 100, 50)
+		tZone.Material = Enum.Material.Neon
+		tZone.Transparency = 0.7
+		tZone.Anchored = true
+		tZone.CanCollide = false
+		tZone.Parent = mapFolder
+	end
+end
+
+-- Add armor stations to the map
+function MapBuilder.AddArmorStations()
+	local mapFolder = getWorldFolder("Map")
+	local stationPositions = Config.MAP.ARMOR_STATIONS or {}
+	for i, pos in ipairs(stationPositions) do
+		local station = Util.MakePart("ArmorStation_" .. i, Vector3.new(6, 1, 6), pos, Color3.fromRGB(200, 200, 100), Enum.Material.SmoothPlastic, true)
+		station.Parent = mapFolder
+		-- Glow
+		local glow = Instance.new("PointLight")
+		glow.Color = Color3.fromRGB(200, 200, 100)
+		glow.Brightness = 2
+		glow.Range = 15
+		glow.Parent = station
+		-- Collect handler
+		station.Touched:Connect(function(hit)
+			local hero = HeroSystem and HeroSystem.GetHeroFromPart(hit)
+			if hero and hero.Alive and hero.Armor ~= nil and hero.Armor < hero.MaxArmor then
+				hero.Armor = math.min(hero.MaxArmor, hero.Armor + Config.ARMOR_PICKUP_AMOUNT)
+				station.Transparency = 0.5
+				fireEffect({effectType = "ArmorPickup", position = pos, heroGuid = hero.Guid})
+				task.delay(10, function()
+					if station and station.Parent then
+						station.Transparency = 0
+					end
+				end)
+			end
+		end)
+	end
+end
+
+-- Spawn power pickups around the map
+function MapBuilder.AddPowerPickups()
+	local mapFolder = getWorldFolder("Map")
+	local pickupsFolder = getWorldFolder("Pickups")
+	local powerPositions = Config.MAP.POWERUP_SPAWNS or {}
+
+	-- Power types: SpeedBoost, DamageBoost, Shield, Health
+	local powerTypes = {"SpeedBoost", "DamageBoost", "Shield", "Health"}
+
+	for i, pos in ipairs(powerPositions) do
+		local powerType = powerTypes[(i - 1) % #powerTypes + 1]
+		local colorMap = {
+			SpeedBoost = Color3.fromRGB(255, 200, 50),
+			DamageBoost = Color3.fromRGB(255, 50, 50),
+			Shield = Color3.fromRGB(50, 150, 255),
+			Health = Color3.fromRGB(50, 255, 100),
+		}
+
+		local pickup = Instance.new("Part")
+		pickup.Name = "PowerPickup_" .. powerType .. "_" .. i
+		pickup.Shape = Enum.PartType.Ball
+		pickup.Size = Vector3.new(2, 2, 2)
+		pickup.Color = colorMap[powerType] or Color3.fromRGB(200, 200, 200)
+		pickup.Material = Enum.Material.Neon
+		pickup.Transparency = 0.3
+		pickup.Anchored = true
+		pickup.CanCollide = false
+		pickup.Position = pos + Vector3.new(0, 1.5, 0)
+		pickup.Parent = pickupsFolder
+
+		-- Glow
+		local glow = Instance.new("PointLight")
+		glow.Color = pickup.Color
+		glow.Brightness = 2
+		glow.Range = 12
+		glow.Parent = pickup
+
+		-- Collect on touch
+		local debounce = false
+		pickup.Touched:Connect(function(hit)
+			if debounce then return end
+			if not pickup or not pickup.Parent then return end
+
+			local hero = HeroSystem and HeroSystem.GetHeroFromPart(hit)
+			if not hero or not hero.Alive then return end
+
+			debounce = true
+			pickup:Destroy()
+
+			-- Apply power effect
+			local powerKey = "power_" .. powerType:lower()
+			hero.ActiveEffects = hero.ActiveEffects or {}
+			hero.ActiveEffects[powerKey] = {
+				ExpireAt = os.clock() + 10,
+				LastTick = os.clock(),
+				PowerType = powerType,
+			}
+
+			if powerType == "SpeedBoost" then
+				local heroDef = HeroConfig[hero.HeroId]
+				if heroDef then
+					hero.Humanoid.WalkSpeed = heroDef.walkSpeed * 1.5
+				end
+			elseif powerType == "Shield" then
+				hero.MaxShield = (hero.MaxShield or 0) + 75
+				hero.ShieldHealth = (hero.ShieldHealth or 0) + 75
+			elseif powerType == "Health" then
+				hero.Health = math.min(hero.MaxHealth, hero.Health + 50)
+				hero.Humanoid.Health = hero.Health
+			end
+
+			fireEffect({
+				effectType = "PowerPickup",
+				position = pos,
+				powerType = powerType,
+				heroGuid = hero.Guid,
+			})
+
+			task.delay(1, function() debounce = false end)
+		end)
 	end
 end
 

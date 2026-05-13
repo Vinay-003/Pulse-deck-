@@ -133,13 +133,29 @@ function InputClient.Init()
 			ClientCore.Fire("RequestAbility", {
 				direction = camera and camera.CFrame.LookVector or Vector3.new(0, 0, -1),
 			})
-		elseif input.KeyCode == Enum.KeyCode.E then
-			-- Ultimate ability
-			local currentTime = os.clock()
-			if currentTime - ultimateRequested > 1.0 then
-				ultimateRequested = currentTime
-				ClientCore.Fire("RequestUltimate", {})
+		elseif input.KeyCode == Enum.KeyCode.B then
+			if UIClient.ShopFrame then
+				UIClient.ShopFrame.Visible = not UIClient.ShopFrame.Visible
 			end
+			-- Also buy menu for bomb mode
+			if ClientCore.State.gameMode == "Bomb" and not UIClient.ShopFrame.Visible then
+				ClientCore.Fire("RequestBuyMenu", {})
+			end
+		elseif input.KeyCode == Enum.KeyCode.E then
+			local hero = ClientCore.State.heroes and ClientCore.State.heroes[1]
+			if ClientCore.State.gameMode == "Bomb" then
+				ClientCore.Fire("RequestPlant", {sitePosition = (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.Position) or Vector3.new(0, 0, 0)})
+			else
+				local currentTime = os.clock()
+				if currentTime - ultimateRequested > 1.0 then
+					ultimateRequested = currentTime
+					ClientCore.Fire("RequestUltimate", {})
+				end
+			end
+		elseif input.KeyCode == Enum.KeyCode.U then
+			ClientCore.Fire("RequestReady", {})
+		elseif input.KeyCode == Enum.KeyCode.F then
+			ClientCore.Fire("RequestPower", { powerId = "speedBoost" })
 		elseif input.KeyCode == Enum.KeyCode.One then
 			ClientCore.Fire("RequestSwitchHero", { slot = 1 })
 		elseif input.KeyCode == Enum.KeyCode.Two then
@@ -152,6 +168,24 @@ function InputClient.Init()
 			ClientCore.Fire("RequestSwitchHero", { slot = 5 })
 		elseif input.KeyCode == Enum.KeyCode.V then
 			CameraClient.ToggleMode()
+		elseif input.KeyCode == Enum.KeyCode.T then
+			if UIClient.EmoteFrame then
+				UIClient.EmoteFrame.Visible = not UIClient.EmoteFrame.Visible
+			end
+		elseif input.KeyCode == Enum.KeyCode.M then
+			if UIClient.PracticeFrame then
+				UIClient.PracticeFrame.Visible = not UIClient.PracticeFrame.Visible
+			end
+		elseif input.KeyCode == Enum.KeyCode.G then
+			CameraClient.FindNextSpectateTarget()
+		elseif input.KeyCode == Enum.KeyCode.H then
+			CameraClient.ToggleSpectateMode()
+		elseif input.KeyCode == Enum.KeyCode.Y then
+			if CameraClient.Spectating then
+				CameraClient.ExitSpectate()
+			else
+				CameraClient.EnterSpectate()
+			end
 		elseif input.KeyCode == Enum.KeyCode.Tab then
 			ClientCore.Fire("RequestScoreboard", {})
 		elseif input.KeyCode == Enum.KeyCode.P then
@@ -169,10 +203,16 @@ function InputClient.Init()
 		end
 	end)
 
-	-- Continuous firing
+	-- Auto-fire support
+	local autoFireConnection
 	RunService.RenderStepped:Connect(function()
 		if firing and os.clock() - lastFireSent >= 0.05 then
 			lastFireSent = os.clock()
+			sendFire()
+		end
+
+		-- Auto-fire for automatic weapons when mouse held
+		if autoFireConnection and firing then
 			sendFire()
 		end
 	end)

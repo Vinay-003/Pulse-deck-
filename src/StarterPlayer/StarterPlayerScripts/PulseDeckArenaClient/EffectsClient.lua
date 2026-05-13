@@ -491,28 +491,892 @@ function EffectsClient.Init()
 			Debris:AddItem(ring, 0.5)
 
 		elseif etype == "Trail" then
-			local trail = Instance.new("Trail")
-			trail.Color = ColorSequence.new(payload.color)
-			trail.Transparency = NumberSequence.new(0, 1)
-			trail.Lifetime = payload.duration or 0.5
-			trail.MinPixelWidth = 4
-			trail.LightEmission = 1
-			trail.Parent = workspace
+			CombatClient.RenderTrail(payload.startPosition, payload.endPosition, payload.color, payload.duration)
 
-			local att0 = Instance.new("Attachment")
-			att0.Position = payload.startPosition
-			att0.Parent = workspace
-			local att1 = Instance.new("Attachment")
-			att1.Position = payload.endPosition
-			att1.Parent = workspace
-			trail.Attachment0 = att0
-			trail.Attachment1 = att1
+			-- === NEW EFFECTS BELOW ===
 
-			task.delay(payload.duration or 0.5, function()
-				trail:Destroy(); att0:Destroy(); att1:Destroy()
+	elseif etype == "FireNova" then
+		-- Expanding fire ring + ground scatter
+		local ring = Instance.new("Part")
+		ring.Name = "FireNovaRing"
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new((payload.radius or 14) * 2, 0.4, (payload.radius or 14) * 2)
+		ring.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Color = payload.color or Color3.fromRGB(255, 80, 20)
+		ring.Material = Enum.Material.Neon
+		ring.Transparency = 0.3
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.Parent = workspace
+		Debris:AddItem(ring, 1)
+
+		-- Expand fire ring
+		spawn(function()
+			local startSize = ring.Size
+			local startTime = os.clock()
+			local dur = 0.6
+			while os.clock() - startTime < dur and ring and ring.Parent do
+				local t = (os.clock() - startTime) / dur
+				ring.Size = Vector3.new(startSize.X + t * (payload.radius or 14), startSize.Y, startSize.Z + t * (payload.radius or 14))
+				ring.Transparency = 0.3 + t * 0.7
+				ring.CFrame = CFrame.new(payload.position + Vector3.new(0, t * 2, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+				task.wait()
+			end
+			if ring and ring.Parent then ring:Destroy() end
+		end)
+
+		-- Fire particles
+		for i = 1, 12 do
+			task.spawn(function()
+				local p = Instance.new("Part")
+				p.Name = "FireNovaParticle"
+				p.Size = Vector3.new(0.5, 0.5, 0.5)
+				p.Shape = Enum.PartType.Ball
+				p.Color = Color3.fromRGB(255, math.random(60, 120), 10)
+				p.Material = Enum.Material.Neon
+				p.Transparency = 0.3
+				p.Anchored = false
+				p.CanCollide = false
+				p.Position = payload.position + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))
+				p.Parent = workspace
+				Debris:AddItem(p, 1.2)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-20, 20), math.random(10, 30), math.random(-20, 20))
+				bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+				bv.Parent = p
+				game:GetService("Debris"):AddItem(bv, 0.5)
 			end)
 		end
-	end)
+
+	elseif etype == "FreezeNova" then
+		-- Ice burst ring
+		local ring = Instance.new("Part")
+		ring.Name = "FreezeNovaRing"
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new((payload.radius or 14) * 2, 0.4, (payload.radius or 14) * 2)
+		ring.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Color = payload.color or Color3.fromRGB(100, 200, 255)
+		ring.Material = Enum.Material.SmoothPlastic
+		ring.Transparency = 0.2
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.Parent = workspace
+		Debris:AddItem(ring, 1.5)
+
+		-- Expanding ice crystals
+		spawn(function()
+			local startTime = os.clock()
+			local dur = 1
+			while os.clock() - startTime < dur and ring and ring.Parent do
+				local t = (os.clock() - startTime) / dur
+				ring.Size = Vector3.new(ring.Size.X + t * 5, ring.Size.Y, ring.Size.Z + t * 5)
+				ring.Transparency = 0.2 + t * 0.6
+				task.wait()
+			end
+		end)
+
+		-- Frost particles
+		for i = 1, 16 do
+			task.spawn(function()
+				local p = Instance.new("Part")
+				p.Name = "FreezeParticle"
+				p.Size = Vector3.new(0.3, 0.3, 0.3)
+				p.Shape = Enum.PartType.Ball
+				p.Color = Color3.fromRGB(150, 220, 255)
+				p.Material = Enum.Material.SmoothPlastic
+				p.Transparency = 0.4
+				p.Anchored = false
+				p.CanCollide = false
+				p.Position = payload.position + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
+				p.Parent = workspace
+				Debris:AddItem(p, 1.5)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-8, 8), math.random(5, 15), math.random(-8, 8))
+				bv.MaxForce = Vector3.new(1e4, 1e4, 1e4)
+				bv.Parent = p
+				game:GetService("Debris"):AddItem(bv, 0.8)
+			end)
+		end
+
+	elseif etype == "Blizzard" then
+		-- Blizzard zone effect — swirling snow ground + overhead cloud
+		local groundRing = Instance.new("Part")
+		groundRing.Name = "BlizzardGround"
+		groundRing.Shape = Enum.PartType.Cylinder
+		groundRing.Size = Vector3.new((payload.radius or 20) * 2, 0.3, (payload.radius or 20) * 2)
+		groundRing.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		groundRing.Color = Color3.fromRGB(180, 210, 240)
+		groundRing.Material = Enum.Material.SmoothPlastic
+		groundRing.Transparency = 0.7
+		groundRing.Anchored = true
+		groundRing.CanCollide = false
+		groundRing.Parent = workspace
+		Debris:AddItem(groundRing, payload.duration or 8)
+
+		-- Overhead cloud
+		local cloud = Instance.new("Part")
+		cloud.Name = "BlizzardCloud"
+		cloud.Size = Vector3.new(payload.radius or 20, 3, payload.radius or 20)
+		cloud.Position = payload.position + Vector3.new(0, 25, 0)
+		cloud.Color = Color3.fromRGB(200, 220, 240)
+		cloud.Material = Enum.Material.SmoothPlastic
+		cloud.Transparency = 0.6
+		cloud.Anchored = true
+		cloud.CanCollide = false
+		cloud.Parent = workspace
+		Debris:AddItem(cloud, payload.duration or 8)
+
+		-- Falling snow visual (sparks)
+		for i = 1, 20 do
+			task.spawn(function()
+				local spark = Instance.new("Part")
+				spark.Size = Vector3.new(0.2, 0.2, 0.2)
+				spark.Shape = Enum.PartType.Ball
+				spark.Color = Color3.fromRGB(220, 235, 255)
+				spark.Material = Enum.Material.SmoothPlastic
+				spark.Transparency = 0.3
+				spark.Anchored = false
+				spark.CanCollide = false
+				spark.Position = payload.position + Vector3.new(math.random(-(payload.radius or 20), payload.radius or 20), math.random(10, 25), math.random(-(payload.radius or 20), payload.radius or 20))
+				spark.Parent = workspace
+				Debris:AddItem(spark, 2)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-2, 2), -math.random(8, 15), math.random(-2, 2))
+				bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+				bv.Parent = spark
+				game:GetService("Debris"):AddItem(bv, 1.5)
+			end)
+		end
+
+	elseif etype == "SupernovaCharge" then
+		-- Charging sphere — pulsing glow
+		local sphere = Instance.new("Part")
+		sphere.Name = "SupernovaChargeSphere"
+		sphere.Size = Vector3.new((payload.radius or 8) * 2, (payload.radius or 8) * 2, (payload.radius or 8) * 2)
+		sphere.Position = payload.position
+		sphere.Color = payload.color or Color3.fromRGB(255, 200, 50)
+		sphere.Material = Enum.Material.Neon
+		sphere.Transparency = 0.3
+		sphere.Anchored = true
+		sphere.CanCollide = false
+		sphere.Shape = Enum.PartType.Ball
+		sphere.Parent = workspace
+
+		-- Pulsing animation
+		spawn(function()
+			local startTime = os.clock()
+			while os.clock() - startTime < 3 and sphere and sphere.Parent do
+				local t = (os.clock() - startTime)
+				local pulse = 1 + math.sin(t * 8) * 0.3
+				sphere.Size = Vector3.new((payload.radius or 8) * 2 * pulse, (payload.radius or 8) * 2 * pulse, (payload.radius or 8) * 2 * pulse)
+				sphere.Transparency = 0.3 + math.sin(t * 6) * 0.15
+				task.wait()
+			end
+			if sphere and sphere.Parent then sphere:Destroy() end
+		end)
+		Debris:AddItem(sphere, 4)
+
+	elseif etype == "SupernovaExplosion" then
+		-- Massive explosion with shockwave
+		local shockwave = Instance.new("Part")
+		shockwave.Name = "SupernovaShockwave"
+		shockwave.Size = Vector3.new((payload.radius or 16) * 2, 0.5, (payload.radius or 16) * 2)
+		shockwave.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		shockwave.Color = payload.color or Color3.fromRGB(255, 200, 50)
+		shockwave.Material = Enum.Material.Neon
+		shockwave.Transparency = 0.2
+		shockwave.Anchored = true
+		shockwave.CanCollide = false
+		shockwave.Parent = workspace
+
+		-- Expand shockwave
+		spawn(function()
+			local startTime = os.clock()
+			local dur = 1.5
+			while os.clock() - startTime < dur and shockwave and shockwave.Parent do
+				local t = (os.clock() - startTime) / dur
+				local s = (payload.radius or 16) * 4
+				shockwave.Size = Vector3.new(s + t * s, 0.5, s + t * s)
+				shockwave.Transparency = 0.2 + t * 0.8
+				task.wait()
+			end
+			if shockwave and shockwave.Parent then shockwave:Destroy() end
+		end)
+
+		-- Central fireball
+		local fireball = Instance.new("Part")
+		fireball.Name = "SupernovaFireball"
+		fireball.Size = Vector3.new(8, 8, 8)
+		fireball.Position = payload.position
+		fireball.Color = Color3.fromRGB(255, 255, 150)
+		fireball.Material = Enum.Material.Neon
+		fireball.Transparency = 0.2
+		fireball.Anchored = true
+		fireball.CanCollide = false
+		fireball.Shape = Enum.PartType.Ball
+		fireball.Parent = workspace
+		Debris:AddItem(fireball, 2)
+
+		-- Light flash
+		local flash = Instance.new("Part")
+		flash.Size = Vector3.new(20, 20, 20)
+		flash.Position = payload.position
+		flash.Color = Color3.fromRGB(255, 255, 200)
+		flash.Material = Enum.Material.Neon
+		flash.Transparency = 0.8
+		flash.Anchored = true
+		flash.CanCollide = false
+		flash.Shape = Enum.PartType.Ball
+		flash.Parent = workspace
+		Debris:AddItem(flash, 0.3)
+
+		-- Rising embers
+		for i = 1, 25 do
+			task.spawn(function()
+				local e = Instance.new("Part")
+				e.Size = Vector3.new(0.4, 0.4, 0.4)
+				e.Shape = Enum.PartType.Ball
+				e.Color = Color3.fromRGB(255, math.random(100, 200), 50)
+				e.Material = Enum.Material.Neon
+				e.Transparency = 0.5
+				e.Anchored = false
+				e.CanCollide = false
+				e.Position = payload.position + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
+				e.Parent = workspace
+				Debris:AddItem(e, 2)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-15, 15), math.random(20, 50), math.random(-15, 15))
+				bv.MaxForce = Vector3.new(1e4, 1e4, 1e4)
+				bv.Parent = e
+				game:GetService("Debris"):AddItem(bv, 1)
+			end)
+		end
+
+	elseif etype == "BlackHole" then
+		-- Dark swirling vortex
+		local vortex = Instance.new("Part")
+		vortex.Name = "BlackHoleVortex"
+		vortex.Size = Vector3.new((payload.radius or 12) * 2, 8, (payload.radius or 12) * 2)
+		vortex.Position = payload.position
+		vortex.Color = Color3.fromRGB(5, 5, 15)
+		vortex.Material = Enum.Material.Neon
+		vortex.Transparency = 0.6
+		vortex.Anchored = true
+		vortex.CanCollide = false
+		vortex.Shape = Enum.PartType.Cylinder
+		vortex.Parent = workspace
+		Debris:AddItem(vortex, payload.duration or 6)
+
+		-- Spinning ring
+		local spinRing = Instance.new("Part")
+		spinRing.Name = "BHSpinRing"
+		spinRing.Size = Vector3.new(0.3, (payload.radius or 12) * 2, (payload.radius or 12) * 2)
+		spinRing.Position = payload.position
+		spinRing.Color = Color3.fromRGB(40, 10, 80)
+		spinRing.Material = Enum.Material.Neon
+		spinRing.Transparency = 0.5
+		spinRing.Anchored = true
+		spinRing.CanCollide = false
+		spinRing.Parent = workspace
+		Debris:AddItem(spinRing, payload.duration or 6)
+
+		-- Accretion disk glow
+		local glow = Instance.new("Part")
+		glow.Name = "BHGlow"
+		glow.Size = Vector3.new((payload.radius or 12) * 1.5, 0.2, (payload.radius or 12) * 1.5)
+		glow.Position = payload.position + Vector3.new(0, 0.5, 0)
+		glow.Color = Color3.fromRGB(100, 50, 150)
+		glow.Material = Enum.Material.Neon
+		glow.Transparency = 0.7
+		glow.Anchored = true
+		glow.CanCollide = false
+		glow.Parent = workspace
+		Debris:AddItem(glow, payload.duration or 6)
+
+	elseif etype == "EMPBlast" then
+		-- Electric pulse ring
+		local ring = Instance.new("Part")
+		ring.Name = "EMPRing"
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new(0.2, (payload.radius or 10) * 2, (payload.radius or 10) * 2)
+		ring.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Color = Color3.fromRGB(0, 200, 255)
+		ring.Material = Enum.Material.Neon
+		ring.Transparency = 0
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.Parent = workspace
+
+		-- Expand and fade
+		spawn(function()
+			local startTime = os.clock()
+			local dur = 0.8
+			while os.clock() - startTime < dur and ring and ring.Parent do
+				local t = (os.clock() - startTime) / dur
+				ring.Size = Vector3.new(t * 2, (payload.radius or 10) * 2 * t, (payload.radius or 10) * 2 * t)
+				ring.Transparency = t
+				task.wait()
+			end
+			if ring and ring.Parent then ring:Destroy() end
+		end)
+
+		-- Sparks
+		for i = 1, 16 do
+			task.spawn(function()
+				local s = Instance.new("Part")
+				s.Size = Vector3.new(0.2, 0.8, 0.2)
+				s.Color = Color3.fromRGB(0, 255, 255)
+				s.Material = Enum.Material.Neon
+				s.Transparency = 0.5
+				s.Anchored = false
+				s.CanCollide = false
+				s.Position = payload.position + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
+				s.Parent = workspace
+				Debris:AddItem(s, 0.6)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-10, 10), math.random(5, 20), math.random(-10, 10))
+				bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+				bv.Parent = s
+				game:GetService("Debris"):AddItem(bv, 0.4)
+			end)
+		end
+
+	elseif etype == "SmokeScreen" then
+		-- Gray smoke cloud
+		local smoke = Instance.new("Part")
+		smoke.Name = "SmokeCloud"
+		smoke.Size = Vector3.new((payload.radius or 12) * 2, 6, (payload.radius or 12) * 2)
+		smoke.Position = payload.position
+		smoke.Color = Color3.fromRGB(150, 150, 150)
+		smoke.Material = Enum.Material.SmoothPlastic
+		smoke.Transparency = 0.3
+		smoke.Anchored = true
+		smoke.CanCollide = false
+		smoke.Parent = workspace
+		Debris:AddItem(smoke, payload.duration or 6)
+
+		-- Drifting smoke particles
+		for i = 1, 12 do
+			task.spawn(function()
+				local p = Instance.new("Part")
+				p.Size = Vector3.new(math.random(20, 40) / 10, math.random(20, 40) / 10, math.random(20, 40) / 10)
+				p.Color = Color3.fromRGB(160, 160, 170)
+				p.Material = Enum.Material.SmoothPlastic
+				p.Transparency = 0.4
+				p.Anchored = false
+				p.CanCollide = false
+				p.Position = payload.position + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
+				p.Parent = workspace
+				Debris:AddItem(p, 3)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-3, 3), math.random(1, 4), math.random(-3, 3))
+				bv.MaxForce = Vector3.new(1e2, 1e2, 1e2)
+				bv.Parent = p
+				game:GetService("Debris"):AddItem(bv, 2)
+			end)
+		end
+
+	elseif etype == "Cloak" then
+		-- Stealth shimmer effect at hero location
+		local shimmer = Instance.new("Part")
+		shimmer.Name = "CloakShimmer"
+		shimmer.Size = Vector3.new(3, 5, 3)
+		shimmer.Position = payload.position or Vector3.new(0, 5, 0)
+		shimmer.Color = Color3.fromRGB(40, 40, 50)
+		shimmer.Material = Enum.Material.Neon
+		shimmer.Transparency = 0.5
+		shimmer.Anchored = true
+		shimmer.CanCollide = false
+		shimmer.Parent = workspace
+		Debris:AddItem(shimmer, payload.duration or 8)
+
+	elseif etype == "TacticalOverlay" then
+		-- Mini-map style ping at hero location
+		local ping = Instance.new("Part")
+		ping.Name = "TactPing"
+		ping.Size = Vector3.new(1, 0.1, 1)
+		ping.Position = payload.position or Vector3.new(0, 0.5, 0)
+		ping.Color = Color3.fromRGB(0, 255, 100)
+		ping.Material = Enum.Material.Neon
+		ping.Transparency = 0.3
+		ping.Anchored = true
+		ping.CanCollide = false
+		ping.Parent = workspace
+		Debris:AddItem(ping, payload.duration or 6)
+
+	elseif etype == "PhoenixDive" then
+		-- Sky dive trail from above
+		local beam = Instance.new("Part")
+		beam.Name = "DiveBeam"
+		beam.Size = Vector3.new(3, 80, 3)
+		beam.Position = payload.position + Vector3.new(0, 40, 0)
+		beam.Color = Color3.fromRGB(255, 100, 0)
+		beam.Material = Enum.Material.Neon
+		beam.Transparency = 0.4
+		beam.Anchored = true
+		beam.CanCollide = false
+		beam.Parent = workspace
+		Debris:AddItem(beam, 1)
+
+	elseif etype == "PhoenixDiveImpact" then
+		-- Ground impact crater + fire
+		local crater = Instance.new("Part")
+		crater.Name = "ImpactCrater"
+		crater.Shape = Enum.PartType.Cylinder
+		crater.Size = Vector3.new((payload.radius or 15) * 2, 0.5, (payload.radius or 15) * 2)
+		crater.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		crater.Color = Color3.fromRGB(40, 20, 10)
+		crater.Material = Enum.Material.Concrete
+		crater.Anchored = true
+		crater.CanCollide = false
+		crater.Parent = workspace
+		Debris:AddItem(crater, 5)
+
+		local fireRing = Instance.new("Part")
+		fireRing.Name = "ImpactFireRing"
+		fireRing.Shape = Enum.PartType.Cylinder
+		fireRing.Size = Vector3.new((payload.radius or 15) * 2, 0.3, (payload.radius or 15) * 2)
+		fireRing.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		fireRing.Color = Color3.fromRGB(255, 100, 0)
+		fireRing.Material = Enum.Material.Neon
+		fireRing.Transparency = 0.4
+		fireRing.Anchored = true
+		fireRing.CanCollide = false
+		fireRing.Parent = workspace
+		Debris:AddItem(fireRing, 2)
+
+	elseif etype == "ArmorPickup" then
+		local shieldGlow = Instance.new("Part")
+		shieldGlow.Size = Vector3.new(4, 0.2, 4)
+		shieldGlow.Position = payload.position + Vector3.new(0, 0.5, 0)
+		shieldGlow.Color = Color3.fromRGB(200, 200, 100)
+		shieldGlow.Material = Enum.Material.Neon
+		shieldGlow.Transparency = 0.4
+		shieldGlow.Anchored = true
+		shieldGlow.CanCollide = false
+		shieldGlow.Parent = workspace
+		Debris:AddItem(shieldGlow, 0.8)
+
+	elseif etype == "PowerPickup" then
+		local powerType = payload.powerType or "Health"
+		local colorMap = {
+			SpeedBoost = Color3.fromRGB(255, 200, 50),
+			DamageBoost = Color3.fromRGB(255, 50, 50),
+			Shield = Color3.fromRGB(50, 150, 255),
+			Health = Color3.fromRGB(50, 255, 100),
+		}
+		local color = colorMap[powerType] or Color3.fromRGB(255, 255, 255)
+
+		-- Burst particles
+		for i = 1, 10 do
+			task.spawn(function()
+				local p = Instance.new("Part")
+				p.Size = Vector3.new(0.3, 0.3, 0.3)
+				p.Shape = Enum.PartType.Ball
+				p.Color = color
+				p.Material = Enum.Material.Neon
+				p.Transparency = 0.4
+				p.Anchored = false
+				p.CanCollide = false
+				p.Position = (payload.position or Vector3.new(0, 1, 0)) + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
+				p.Parent = workspace
+				Debris:AddItem(p, 1)
+
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-10, 10), math.random(3, 10), math.random(-10, 10))
+				bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+				bv.Parent = p
+				game:GetService("Debris"):AddItem(bv, 0.6)
+			end)
+		end
+
+	end
+
+	elseif etype == "BombPlant" then
+		local beacon = Instance.new("Part")
+		beacon.Name = "BombBeacon"
+		beacon.Size = Vector3.new(6, 0.3, 6)
+		beacon.Position = payload.position + Vector3.new(0, 0.2, 0)
+		beacon.Color = Color3.fromRGB(255, 100, 50)
+		beacon.Material = Enum.Material.Neon
+		beacon.Transparency = 0.3
+		beacon.Anchored = true
+		beacon.CanCollide = false
+		beacon.Parent = workspace
+		Debris:AddItem(beacon, payload.duration or 40)
+
+		local beam = Instance.new("Part")
+		beam.Name = "BombBeam"
+		beam.Size = Vector3.new(0.5, 60, 0.5)
+		beam.Position = payload.position + Vector3.new(0, 30, 0)
+		beam.Color = Color3.fromRGB(255, 80, 30)
+		beam.Material = Enum.Material.Neon
+		beam.Transparency = 0.5
+		beam.Anchored = true
+		beam.CanCollide = false
+		beam.Parent = workspace
+		Debris:AddItem(beam, payload.duration or 40)
+
+	elseif etype == "BombDefusing" then
+		local ring = Instance.new("Part")
+		ring.Name = "DefuseRing"
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new(6, 0.2, 6)
+		ring.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Color = Color3.fromRGB(50, 150, 255)
+		ring.Material = Enum.Material.Neon
+		ring.Transparency = 0.5
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.Parent = workspace
+		Debris:AddItem(ring, 0.3)
+
+	elseif etype == "BombExplosion" then
+		local bigRing = Instance.new("Part")
+		bigRing.Name = "BombExpRing"
+		bigRing.Shape = Enum.PartType.Cylinder
+		bigRing.Size = Vector3.new(40, 0.5, 40)
+		bigRing.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		bigRing.Color = Color3.fromRGB(255, 200, 50)
+		bigRing.Material = Enum.Material.Neon
+		bigRing.Transparency = 0.2
+		bigRing.Anchored = true
+		bigRing.CanCollide = false
+		bigRing.Parent = workspace
+		Debris:AddItem(bigRing, 1)
+
+		local fireball = Instance.new("Part")
+		fireball.Name = "BombFireball"
+		fireball.Shape = Enum.PartType.Ball
+		fireball.Size = Vector3.new(20, 20, 20)
+		fireball.Position = payload.position
+		fireball.Color = Color3.fromRGB(255, 150, 30)
+		fireball.Material = Enum.Material.Neon
+		fireball.Transparency = 0.3
+		fireball.Anchored = true
+		fireball.CanCollide = false
+		fireball.Parent = workspace
+		Debris:AddItem(fireball, 2)
+
+		for i = 1, 30 do
+			task.spawn(function()
+				local p = Instance.new("Part")
+				p.Size = Vector3.new(0.5, 0.5, 0.5)
+				p.Shape = Enum.PartType.Ball
+				p.Color = Color3.fromRGB(255, math.random(80, 200), 30)
+				p.Material = Enum.Material.Neon
+				p.Transparency = 0.4
+				p.Anchored = false
+				p.CanCollide = false
+				p.Position = payload.position + Vector3.new(math.random(-8, 8), 0, math.random(-8, 8))
+				p.Parent = workspace
+				Debris:AddItem(p, 2)
+				local bv = Instance.new("BodyVelocity")
+				bv.Velocity = Vector3.new(math.random(-25, 25), math.random(15, 40), math.random(-25, 25))
+				bv.MaxForce = Vector3.new(1e5, 1e5, 1e5)
+				bv.Parent = p
+				game:GetService("Debris"):AddItem(bv, 1)
+			end)
+		end
+
+	elseif etype == "CTFFlagCapture" then
+		-- Flag capture celebration
+		local color = payload.teamColor or Color3.fromRGB(255, 255, 255)
+		for i = 1, 4 do
+			local ring = Instance.new("Part")
+			ring.Name = "FlagCaptureRing"
+			ring.Shape = Enum.PartType.Cylinder
+			ring.Size = Vector3.new(0.2, (payload.radius or 10) * i * 2, (payload.radius or 10) * i * 2)
+			ring.CFrame = CFrame.new(payload.position + Vector3.new(0, i * 1.5, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+			ring.Color = color
+			ring.Material = Enum.Material.Neon
+			ring.Transparency = 0.5
+			ring.Anchored = true
+			ring.CanCollide = false
+			ring.Parent = workspace
+			Debris:AddItem(ring, 2 + i * 0.5)
+end
+
+	elseif etype == "KOTHZoneActive" then
+		-- Hill control beam
+		local beam = Instance.new("Part")
+		beam.Name = "KOTHBeam"
+		beam.Size = Vector3.new(0.5, 60, 0.5)
+		beam.Position = payload.position + Vector3.new(0, 30, 0)
+		beam.Color = payload.color or Color3.fromRGB(255, 215, 0)
+		beam.Material = Enum.Material.Neon
+		beam.Transparency = 0.6
+		beam.Anchored = true
+		beam.CanCollide = false
+		beam.Parent = workspace
+		Debris:AddItem(beam, payload.duration or 3)
+
+	-- === KILL EFFECTS ===
+
+	elseif etype == "ElectricShock" then
+		-- Electric burst at kill position
+		for i = 1, 6 do
+			local bolt = Instance.new("Part")
+			bolt.Size = Vector3.new(0.2, math.random(3, 8), 0.2)
+			bolt.Position = payload.position + Vector3.new(math.random(-4, 4), math.random(0, 6), math.random(-4, 4))
+			bolt.Color = Color3.fromRGB(255, 255, 100)
+			bolt.Material = Enum.Material.Neon
+			bolt.Transparency = 0.3
+			bolt.Anchored = true
+			bolt.CanCollide = false
+			bolt.Parent = workspace
+			Debris:AddItem(bolt, 0.4)
+		end
+
+	elseif etype == "GroundSlam" then
+		-- Shockwave on ground
+		local ring = Instance.new("Part")
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new(0.2, 20, 20)
+		ring.CFrame = CFrame.new(payload.position) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Color = Color3.fromRGB(200, 100, 50)
+		ring.Material = Enum.Material.Neon
+		ring.Transparency = 0.4
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.Parent = workspace
+		Debris:AddItem(ring, 0.5)
+
+	elseif etype == "Disintegration" then
+		-- Fading particle burst
+		for i = 1, 16 do
+			local p = Instance.new("Part")
+			p.Size = Vector3.new(0.3, 0.3, 0.3)
+			p.Color = Color3.fromRGB(100, 150, 255)
+			p.Material = Enum.Material.Neon
+			p.Transparency = 0.5
+			p.Anchored = false
+			p.CanCollide = false
+			p.Position = payload.position + Vector3.new(math.random(-3, 3), math.random(-2, 2), math.random(-3, 3))
+			p.Parent = workspace
+			Debris:AddItem(p, 1)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-10, 10), math.random(5, 15), math.random(-10, 10))
+			bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+			bv.Parent = p
+			game:GetService("Debris"):AddItem(bv, 0.8)
+		end
+
+	elseif etype == "HealBurst" then
+		-- Green healing burst
+		for i = 1, 12 do
+			local p = Instance.new("Part")
+			p.Size = Vector3.new(0.4, 0.4, 0.4)
+			p.Shape = Enum.PartType.Ball
+			p.Color = Color3.fromRGB(50, 255, 120)
+			p.Material = Enum.Material.Neon
+			p.Transparency = 0.4
+			p.Anchored = false
+			p.CanCollide = false
+			p.Position = payload.position + Vector3.new(math.random(-3, 3), math.random(0, 4), math.random(-3, 3))
+			p.Parent = workspace
+			Debris:AddItem(p, 0.8)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-8, 8), math.random(5, 15), math.random(-8, 8))
+			bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+			bv.Parent = p
+			game:GetService("Debris"):AddItem(bv, 0.6)
+		end
+
+	elseif etype == "BigExplosion" then
+		-- Large explosion effect
+		explosion(payload.position, 16, Color3.fromRGB(255, 120, 30), 0.8)
+
+	elseif etype == "GlitchExplode" then
+		-- Digital glitch burst
+		for i = 1, 10 do
+			local p = Instance.new("Part")
+			p.Size = Vector3.new(math.random(5, 15) / 10, math.random(5, 15) / 10, 1)
+			p.Color = Color3.fromRGB(math.random(150, 255), 0, math.random(150, 255))
+			p.Material = Enum.Material.Neon
+			p.Transparency = 0.3
+			p.Anchored = true
+			p.CanCollide = false
+			p.Position = payload.position + Vector3.new(math.random(-5, 5), math.random(-3, 3), math.random(-5, 5))
+			p.CFrame = CFrame.Angles(0, 0, math.rad(math.random(0, 360)))
+			p.Parent = workspace
+			Debris:AddItem(p, 0.5)
+		end
+
+	elseif etype == "TurretKill" then
+		-- Mechanical burst
+		for i = 1, 8 do
+			local spark = Instance.new("Part")
+			spark.Size = Vector3.new(0.2, 0.8, 0.2)
+			spark.Color = Color3.fromRGB(255, 200, 50)
+			spark.Material = Enum.Material.Neon
+			spark.Transparency = 0.5
+			spark.Anchored = false
+			spark.CanCollide = false
+			spark.Position = payload.position + Vector3.new(math.random(-2, 2), math.random(-2, 2), math.random(-2, 2))
+			spark.Parent = workspace
+			Debris:AddItem(spark, 0.5)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-8, 8), math.random(2, 10), math.random(-8, 8))
+			bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+			bv.Parent = spark
+			game:GetService("Debris"):AddItem(bv, 0.4)
+		end
+
+	elseif etype == "EnergyBurst" then
+		-- Cyan energy burst
+		for i = 1, 14 do
+			local p = Instance.new("Part")
+			p.Size = Vector3.new(0.3, 0.3, 0.3)
+			p.Shape = Enum.PartType.Ball
+			p.Color = Color3.fromRGB(0, 200, 255)
+			p.Material = Enum.Material.Neon
+			p.Transparency = 0.4
+			p.Anchored = false
+			p.CanCollide = false
+			p.Position = payload.position + Vector3.new(math.random(-4, 4), math.random(0, 5), math.random(-4, 4))
+			p.Parent = workspace
+			Debris:AddItem(p, 1)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-12, 12), math.random(5, 15), math.random(-12, 12))
+			bv.MaxForce = Vector3.new(1e4, 1e4, 1e4)
+			bv.Parent = p
+			game:GetService("Debris"):AddItem(bv, 0.8)
+		end
+
+	elseif etype == "ShadowKill" then
+		-- Dark shadow burst
+		for i = 1, 8 do
+			local p = Instance.new("Part")
+			p.Size = Vector3.new(0.4, 0.4, 0.4)
+			p.Color = Color3.fromRGB(20, 20, 30)
+			p.Material = Enum.Material.Neon
+			p.Transparency = 0.3
+			p.Anchored = false
+			p.CanCollide = false
+			p.Position = payload.position + Vector3.new(math.random(-3, 3), math.random(-1, 3), math.random(-3, 3))
+			p.Parent = workspace
+			Debris:AddItem(p, 0.8)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-8, 8), math.random(3, 10), math.random(-8, 8))
+			bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+			bv.Parent = p
+			game:GetService("Debris"):AddItem(bv, 0.6)
+		end
+
+	elseif etype == "TimeSnap" then
+		-- Time fracture effect
+		for i = 1, 6 do
+			local shard = Instance.new("Part")
+			shard.Size = Vector3.new(math.random(30, 60) / 10, 0.2, math.random(30, 60) / 10)
+			shard.Color = Color3.fromRGB(100, 180, 255)
+			shard.Material = Enum.Material.SmoothPlastic
+			shard.Transparency = 0.4
+			shard.Anchored = true
+			shard.CanCollide = false
+			shard.Position = payload.position + Vector3.new(math.random(-4, 4), math.random(0, 3), math.random(-4, 4))
+			shard.CFrame = CFrame.Angles(math.rad(math.random(0, 360)), math.rad(math.random(0, 360)), 0)
+			shard.Parent = workspace
+			Debris:AddItem(shard, 0.6)
+		end
+
+	elseif etype == "PlasmaExplode" then
+		-- Magenta plasma burst
+		explosion(payload.position, 14, Color3.fromRGB(255, 50, 200), 0.6)
+		for i = 1, 12 do
+			local p = Instance.new("Part")
+			p.Size = Vector3.new(0.4, 0.4, 0.4)
+			p.Shape = Enum.PartType.Ball
+			p.Color = Color3.fromRGB(255, 100, 220)
+			p.Material = Enum.Material.Neon
+			p.Transparency = 0.4
+			p.Anchored = false
+			p.CanCollide = false
+			p.Position = payload.position + Vector3.new(math.random(-4, 4), math.random(0, 5), math.random(-4, 4))
+			p.Parent = workspace
+			Debris:AddItem(p, 0.8)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-12, 12), math.random(5, 15), math.random(-12, 12))
+			bv.MaxForce = Vector3.new(1e4, 1e4, 1e4)
+			bv.Parent = p
+			game:GetService("Debris"):AddItem(bv, 0.6)
+		end
+
+	elseif etype == "HammerSlam" then
+		-- Ground pound shockwave
+		explosion(payload.position, 18, Color3.fromRGB(200, 100, 50), 0.7)
+		local ring = Instance.new("Part")
+		ring.Shape = Enum.PartType.Cylinder
+		ring.Size = Vector3.new(0.3, 28, 28)
+		ring.CFrame = CFrame.new(payload.position + Vector3.new(0, 0.2, 0)) * CFrame.Angles(math.rad(90), 0, 0)
+		ring.Color = Color3.fromRGB(180, 80, 30)
+		ring.Material = Enum.Material.Neon
+		ring.Transparency = 0.3
+		ring.Anchored = true
+		ring.CanCollide = false
+		ring.Parent = workspace
+		Debris:AddItem(ring, 0.6)
+
+	elseif etype == "Burning" then
+		-- Burn death effect
+		for i = 1, 14 do
+			local flame = Instance.new("Part")
+			flame.Size = Vector3.new(math.random(20, 50) / 10, math.random(20, 50) / 10, math.random(20, 50) / 10)
+			flame.Color = Color3.fromRGB(255, math.random(60, 140), 0)
+			flame.Material = Enum.Material.Neon
+			flame.Transparency = 0.4
+			flame.Anchored = false
+			flame.CanCollide = false
+			flame.Position = payload.position + Vector3.new(math.random(-3, 3), math.random(0, 4), math.random(-3, 3))
+			flame.Parent = workspace
+			Debris:AddItem(flame, 0.6)
+			local bv = Instance.new("BodyVelocity")
+			bv.Velocity = Vector3.new(math.random(-6, 6), math.random(3, 10), math.random(-6, 6))
+			bv.MaxForce = Vector3.new(1e3, 1e3, 1e3)
+			bv.Parent = flame
+			game:GetService("Debris"):AddItem(bv, 0.5)
+		end
+
+	elseif etype == "SparkBurst" then
+		-- Golden spark burst
+		for i = 1, 18 do
+			local spark = Instance.new("Part")
+			spark.Size = Vector3.new(0.15, 0.15, math.random(30, 80) / 10)
+			spark.Color = Color3.fromRGB(255, 220, 50)
+			spark.Material = Enum.Material.Neon
+			spark.Transparency = 0.3
+			spark.Anchored = true
+			spark.CanCollide = false
+			spark.Position = payload.position + Vector3.new(math.random(-3, 3), math.random(-2, 3), math.random(-3, 3))
+			spark.CFrame = CFrame.new(spark.Position, spark.Position + Vector3.new(math.random(-5, 5), math.random(-5, 5), math.random(-5, 5)))
+			spark.Parent = workspace
+			Debris:AddItem(spark, 0.4)
+		end
+
+	elseif etype == "FreezeShatter" then
+		-- Ice shatter effect
+		for i = 1, 16 do
+			local shard = Instance.new("Part")
+			shard.Size = Vector3.new(math.random(20, 40) / 10, 0.15, math.random(20, 40) / 10)
+			shard.Color = Color3.fromRGB(150, 220, 255)
+			shard.Material = Enum.Material.SmoothPlastic
+			shard.Transparency = 0.3
+			shard.Anchored = true
+			shard.CanCollide = false
+			shard.Position = payload.position + Vector3.new(math.random(-4, 4), math.random(-2, 2), math.random(-4, 4))
+			shard.CFrame = CFrame.Angles(math.rad(math.random(0, 360)), math.rad(math.random(0, 360)), 0)
+			shard.Parent = workspace
+Debris:AddItem(shard, 0.6)
+		end
+
+	end
+end
 
 	damageNumberEvent.OnClientEvent:Connect(function(payload)
 		local camera = workspace.CurrentCamera

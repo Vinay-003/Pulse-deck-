@@ -27,4 +27,34 @@ function ProgressionUtils.GetXpNeededForLevel(level: number): number
 	return XP_LEVELS[#XP_LEVELS] + (level - 1 - #XP_LEVELS) * 25000
 end
 
+ProgressionUtils.BATTLE_PASS_TIERS = {}
+for i = 1, 50 do
+	ProgressionUtils.BATTLE_PASS_TIERS[i] = {
+		xpRequired = 500 + (i - 1) * 150,
+		freeReward = (i % 5 == 0) and {type = "coins", amount = 100} or (i % 3 == 0) and {type = "skin_token", id = nil} or nil,
+		premiumReward = (i % 10 == 0) and {type = "skin_chest", rarity = "Epic"} or {type = "coins", amount = 200},
+	}
+end
+
+function ProgressionUtils.GetBattlePassTier(xp)
+	local tier = 0
+	local accumulated = 0
+	for i = 1, 50 do
+		local needed = 500 + (i - 1) * 150
+		if accumulated + needed > xp then
+			return i, accumulated, xp - accumulated
+		end
+		accumulated += needed
+		tier = i
+	end
+	return 50, accumulated, 0
+end
+
+function ProgressionUtils.GetBattlePassProgress(xp)
+	local tier, used, remainder = ProgressionUtils.GetBattlePassTier(xp)
+	local nextNeeded = 500 + (tier) * 150
+	local progress = remainder / nextNeeded
+	return tier, progress, nextNeeded
+end
+
 return ProgressionUtils

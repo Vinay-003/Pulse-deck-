@@ -4,6 +4,7 @@ local DataStoreService = game:GetService("DataStoreService")
 
 local sharedRoot = script.Parent.Parent:WaitForChild("Shared")
 local ProgressionUtils = require(sharedRoot:WaitForChild("ProgressionUtils"))
+local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
 
 local ProgressionSystem = {}
@@ -31,6 +32,11 @@ local function defaultProfile()
 		LastPlayed = 0,
 		Achievements = {},
 		PrestigeLevel = 0,
+		BattlePassTier = 0,
+		BattlePassXP = 0,
+		BattlePassPremium = false,
+		PurchasedItems = {},
+		TotalSpent = 0,
 	}
 end
 
@@ -236,6 +242,193 @@ function ProgressionSystem.UnlockHero(player, heroId)
 		return true
 	end
 	return false
+end
+
+function ProgressionSystem.UnlockSkin(player, heroId, skinId)
+	local profile = ProgressionSystem.Profiles[player.UserId]
+	if not profile then return false end
+
+	-- Check hero is unlocked
+	if not table.find(profile.UnlockedHeroes, heroId) then return false end
+
+	local heroDef = HeroConfig[heroId]
+	if not heroDef or not heroDef.skins or not heroDef.skins[skinId] then return false end
+
+	local skinKey = heroId .. "_" .. skinId
+	if table.find(profile.OwnedSkins, skinKey) then
+		-- Already owned, just equip
+		profile.EquippedSkin = skinKey
+		ProgressionSystem.SyncLeaderstats(player)
+		return true
+	end
+
+	-- Check skin rarity and cost
+	local skinDef = heroDef.skins[skinId]
+	local cost = 100 -- default
+	if skinDef.rarity == "Common" then
+		cost = 50
+	elseif skinDef.rarity == "Rare" then
+		cost = 200
+	elseif skinDef.rarity == "Epic" then
+		cost = 500
+	elseif skinDef.rarity == "Legendary" then
+		cost = 1500
+	end
+
+	if profile.Coins >= cost then
+		profile.Coins -= cost
+		table.insert(profile.OwnedSkins, skinKey)
+		profile.EquippedSkin = skinKey
+		ProgressionSystem.SyncLeaderstats(player)
+		return true
+	end
+	return false
+end
+
+function ProgressionSystem.EquipSkin(player, heroId, skinId)
+	local profile = ProgressionSystem.Profiles[player.UserId]
+	if not profile then
+		profile = ProgressionSystem.Load(player)
+	end
+
+	local heroDef = HeroConfig[heroId]
+	if heroDef and heroDef.skins and heroDef.skins[skinId] then
+		-- Allow equipping default skin without owning it
+		if skinId == "default" then
+			profile.EquippedSkin = "default"
+			ProgressionSystem.SyncLeaderstats(player)
+			return true
+		end
+
+		-- Check if skin is owned
+		local skinKey = heroId .. "_" .. skinId
+		if table.find(profile.OwnedSkins, skinKey) then
+			profile.EquippedSkin = skinId
+			ProgressionSystem.SyncLeaderstats(player)
+			return true
+		end
+	end
+	return false
+end
+
+function ProgressionSystem.RecordKill(player, heroId, kills, deaths)
+	local profile = ProgressionSystem.Profiles[player.UserId]
+	if not profile then return end
+
+	profile.TotalKills = (profile.TotalKills or 0) + kills
+	profile.TotalDeaths = (profile.TotalDeaths or 0) + deaths
+
+	-- Track favorite hero
+	if not profile.HeroStats then profile.HeroStats = {} end
+	if not profile.HeroStats[heroId] then
+		profile.HeroStats[heroId] = {kills = 0, deaths = 0, damage = 0}
+	end
+	profile.HeroStats[heroId].kills = profile.HeroStats[heroId].kills + kills
+	profile.HeroStats[heroId].deaths = profile.HeroStats[heroId].deaths + deaths
+
+	local bestHero = nil
+	local bestKills = 0
+	for hero, stats in pairs(profile.HeroStats) do
+		if stats.kills > bestKills then
+			bestKills = stats.kills
+			bestHero = hero
+		end
+	end
+	profile.FavoriteHero = bestHero
+
+	-- Check achievement unlocks
+	local function checkAndAwardAchievement(name, condition, xpReward)
+		if not profile.Achievements[name] and condition() then
+			profile.Achievements[name] = true
+			profile.XP = (profile.XP or 0) + xpReward
+		end
+	end
+
+	checkAndAwardAchievement("first_blood", function() return kills >= 1 end, 50)
+	checkAndAwardAchievement("five_kills", function() return kills >= 5 end, 100)
+	checkAndAwardAchievement("ten_kills", function() return kills >= 10 end, 200)
+	checkAndAwardAchievement("dominator", function() return kills >= 20 end, 500)
+	checkAndAwardAchievement("perfection", function() return kills > 0 and deaths == 0 end, 150)
+
+	ProgressionSystem.SyncLeaderstats(player)
+end
+
+function ProgressionSystem.GetSkinList(heroId)
+	local heroDef = HeroConfig[heroId]
+	if not heroDef or not heroDef.skins then return {"default"} end
+	local skins = {"default"}
+	for id, _ in pairs(heroDef.skins) do
+		if id ~= "default" then
+			table.insert(skins, id)
+		end
+	end
+	return skins
+end
+
+function ProgressionSystem.GetSkinRarity(heroId, skinId)
+	local heroDef = HeroConfig[heroId]
+	if heroDef and heroDef.skins and heroDef.skins[skinId] then
+		return heroDef.skins[skinId].rarity or "Default"
+	end
+	return "Default"
+end
+
+function ProgressionSystem.PurchaseShopItem(player, itemId)
+	local profile = ProgressionSystem.Profiles[player.UserId]
+	if not profile then return false, "No profile" end
+
+	local item = nil
+	for _, shopItem in ipairs(Config.SHOP_ITEMS) do
+		if shopItem.id == itemId then
+			item = shopItem
+			break
+		end
+	end
+	if not item then return false, "Item not found" end
+	if profile.Coins < item.price then return false, "Not enough coins" end
+
+	profile.Coins = profile.Coins - item.price
+	profile.TotalSpent = (profile.TotalSpent or 0) + item.price
+	if not profile.PurchasedItems then profile.PurchasedItems = {} end
+	table.insert(profile.PurchasedItems, itemId)
+
+	-- Handle rewards
+	if itemId == "coins_500" then
+		profile.Coins += 500
+	elseif itemId == "coins_1500" then
+		profile.Coins += 1500
+	elseif itemId == "coins_4000" then
+		profile.Coins += 4000
+	elseif string.find(itemId, "skin_bundle") then
+		for _, skinKey in ipairs(item.items or {}) do
+			if not table.find(profile.OwnedSkins or {}, skinKey) then
+				table.insert(profile.OwnedSkins, skinKey)
+			end
+		end
+	end
+
+	ProgressionSystem.SyncLeaderstats(player)
+	return true, "Purchased"
+end
+
+function ProgressionSystem.GetBattlePassRewards(tier)
+	local reward = ProgressionUtils.BATTLE_PASS_TIERS[tier]
+	return reward or nil
+end
+
+function ProgressionSystem.ClaimBattlePassReward(player, tier)
+	local profile = ProgressionSystem.Profiles[player.UserId]
+	if not profile then return false end
+	if not profile.BattlePassClaimed then profile.BattlePassClaimed = {} end
+	if profile.BattlePassClaimed[tier] then return false, "Already claimed" end
+	local reward = ProgressionSystem.GetBattlePassRewards(tier)
+	if not reward then return false, "No reward" end
+	profile.BattlePassClaimed[tier] = true
+	if reward.type == "coins" then
+		profile.Coins += reward.amount or 0
+	end
+	ProgressionSystem.SyncLeaderstats(player)
+	return true
 end
 
 return ProgressionSystem

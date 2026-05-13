@@ -19,8 +19,10 @@ HeroSystem.ControlledHero = {}
 -- Enhanced ragdoll / visual states
 local DEBRIEF_DURATION = 10
 
-local function createRig(heroId, teamId, ownerId, guid)
+local function createRig(heroId, teamId, ownerId, guid, skinId)
 	local heroDef = HeroConfig[heroId]
+	local skinId = skinId or "default"
+	local skinDef = heroDef.skins and heroDef.skins[skinId] or heroDef.skins.default
 	local model = Instance.new("Model")
 	model.Name = heroDef.displayName .. "_" .. guid
 
@@ -94,27 +96,133 @@ local function createRig(heroId, teamId, ownerId, guid)
 	accent.Parent = model
 	weld(torso, accent, CFrame.new(0, 0.2, -0.1), "AccentWeld")
 
-	-- Shoulder pads for armored heroes
-	if heroDef.skins and heroDef.skins.default and heroDef.skins.default.shoulderArmor then
-		local rShoulder = Instance.new("Part")
-		rShoulder.Name = "RightShoulderPad"
-		rShoulder.Size = Vector3.new(1.2, 1.4, 1.4)
-		rShoulder.Color = heroDef.accentColor or Color3.fromRGB(80, 80, 80)
-		rShoulder.Material = Enum.Material.Metal
-		rShoulder.Anchored = false
-		rShoulder.CanCollide = false
-		rShoulder.Parent = model
-		weld(ra, rShoulder, CFrame.new(0, 0.5, 0), "RShoulderPadWeld")
+	-- Helmet / head accessory (skin-aware)
+	if skinDef and skinDef.helmet then
+		local helmet = Instance.new("Part")
+		helmet.Name = "Helmet"
+		helmet.Size = Vector3.new(2.1, 1.5, 2.1)
+		helmet.Color = skinDef.helmetColor or heroDef.primaryColor
+		helmet.Material = Enum.Material.SmoothPlastic
+		helmet.Anchored = false
+		helmet.CanCollide = false
+		helmet.Parent = model
+		weld(head, helmet, CFrame.new(0, 0.05, 0), "HelmetWeld")
 
-		local lShoulder = Instance.new("Part")
-		lShoulder.Name = "LeftShoulderPad"
-		lShoulder.Size = Vector3.new(1.2, 1.4, 1.4)
-		lShoulder.Color = heroDef.accentColor or Color3.fromRGB(80, 80, 80)
-		lShoulder.Material = Enum.Material.Metal
-		lShoulder.Anchored = false
-		lShoulder.CanCollide = false
-		lShoulder.Parent = model
-		weld(la, lShoulder, CFrame.new(0, 0.5, 0), "LShoulderPadWeld")
+		-- Visor
+		local visor = Instance.new("Part")
+		visor.Name = "Visor"
+		visor.Size = Vector3.new(1.6, 0.6, 2.15)
+		visor.Color = skinDef.visorColor or Color3.fromRGB(200, 255, 255)
+		visor.Material = Enum.Material.Neon
+		visor.Transparency = 0.2
+		visor.Anchored = false
+		visor.CanCollide = false
+		visor.Parent = model
+		weld(helmet, visor, CFrame.new(0, 0.15, 0), "VisorWeld")
+	end
+
+	-- Clothing overlays from skin
+	if skinDef then
+		-- Shirt / chest plate overlay
+		if equippedSkin.shirtColor then
+			local shirtOverlay = Instance.new("Part")
+			shirtOverlay.Name = "ClothingShirt"
+			shirtOverlay.Size = Vector3.new(2.2, 2.4, 1.3)
+			shirtOverlay.Color = skinDef.shirtColor
+			shirtOverlay.Material = skinDef.shirtMaterial or Enum.Material.SmoothPlastic
+			shirtOverlay.Transparency = skinDef.shirtTransparency or 0
+			shirtOverlay.Anchored = false
+			shirtOverlay.CanCollide = false
+			shirtOverlay.Parent = model
+			weld(torso, shirtOverlay, CFrame.new(0, 0.1, 0), "ShirtWeld")
+		end
+
+		-- Pants overlay
+		if equippedSkin.pantsColor then
+			local pantsOverlay = Instance.new("Part")
+			pantsOverlay.Name = "ClothingPants"
+			pantsOverlay.Size = Vector3.new(2.1, 2.2, 1.2)
+			pantsOverlay.Color = skinDef.pantsColor
+			pantsOverlay.Material = skinDef.pantsMaterial or Enum.Material.SmoothPlastic
+			pantsOverlay.Transparency = skinDef.pantsTransparency or 0
+			pantsOverlay.Anchored = false
+			pantsOverlay.CanCollide = false
+			pantsOverlay.Parent = model
+			local pWeld = Instance.new("Motor6D")
+			pWeld.Part0 = torso
+			pWeld.Part1 = pantsOverlay
+			pWeld.C0 = CFrame.new(0, -1.2, 0)
+			pWeld.Name = "PantsWeld"
+			pWeld.Parent = torso
+		end
+
+		-- Cape
+		if skinDef.cape then
+			local cape = Instance.new("Part")
+			cape.Name = "Cape"
+			cape.Size = Vector3.new(0.1, 4, 4)
+			cape.Color = skinDef.capeColor or heroDef.accentColor or Color3.fromRGB(200, 50, 50)
+			cape.Material = Enum.Material.Fabric
+			cape.Transparency = 0.2
+			cape.Anchored = false
+			cape.CanCollide = false
+			cape.Parent = model
+			local capeWeld = Instance.new("Motor6D")
+			capeWeld.Part0 = torso
+			capeWeld.Part1 = cape
+			capeWeld.C0 = CFrame.new(0, 1, 0.6)
+			capeWeld.Name = "CapeWeld"
+			capeWeld.Parent = torso
+		end
+
+		-- Shoulder armor (skin-specific overrides generic)
+		if skinDef.shoulderArmor then
+			local rShoulder = Instance.new("Part")
+			rShoulder.Name = "RightShoulderPad"
+			rShoulder.Size = Vector3.new(1.2, 1.4, 1.4)
+			rShoulder.Color = skinDef.accentColor or heroDef.accentColor or Color3.fromRGB(80, 80, 80)
+			rShoulder.Material = Enum.Material.Metal
+			rShoulder.Anchored = false
+			rShoulder.CanCollide = false
+			rShoulder.Parent = model
+			weld(ra, rShoulder, CFrame.new(0, 0.5, 0), "RShoulderPadWeld")
+
+			local lShoulder = Instance.new("Part")
+			lShoulder.Name = "LeftShoulderPad"
+			lShoulder.Size = Vector3.new(1.2, 1.4, 1.4)
+			lShoulder.Color = skinDef.accentColor or heroDef.accentColor or Color3.fromRGB(80, 80, 80)
+			lShoulder.Material = Enum.Material.Metal
+			lShoulder.Anchored = false
+			lShoulder.CanCollide = false
+			lShoulder.Parent = model
+			weld(la, lShoulder, CFrame.new(0, 0.5, 0), "LShoulderPadWeld")
+		end
+
+		-- Emissive glow for rare/legendary skins
+		if skinDef.emissive then
+			local glowColor = skinDef.glowColor or heroDef.accentColor or Color3.fromRGB(255, 200, 50)
+			local glowPart = Instance.new("Part")
+			glowPart.Name = "SkinGlow"
+			glowPart.Size = Vector3.new(3, 5, 3)
+			glowPart.Color = glowColor
+			glowPart.Material = Enum.Material.Neon
+			glowPart.Transparency = 0.7
+			glowPart.Anchored = false
+			glowPart.CanCollide = false
+			glowPart.Parent = model
+			local gWeld = Instance.new("Motor6D")
+			gWeld.Part0 = torso
+			gWeld.Part1 = glowPart
+			gWeld.C0 = CFrame.new(0, 0, 0)
+			gWeld.Name = "GlowWeld"
+			gWeld.Parent = torso
+
+			local glowLight = Instance.new("PointLight")
+			glowLight.Color = glowColor
+			glowLight.Brightness = 1
+			glowLight.Range = 12
+			glowLight.Parent = glowPart
+		end
 	end
 
 	-- Weapon model
@@ -313,7 +421,19 @@ function HeroSystem.SpawnHeroesForOwner(ownerId, teamId, deck, ownerPlayer)
 
 	for slot, heroId in ipairs(deck) do
 		local guid = HttpService:GenerateGUID(false)
-		local model = createRig(heroId, teamId, ownerId, guid)
+		-- Determine skin: use equipped skin from progression if available
+		local skinId = "default"
+		if ownerPlayer and ProgressionSystem and ProgressionSystem.Profiles then
+			local profile = ProgressionSystem.Profiles[ownerPlayer.UserId]
+			if profile and profile.EquippedSkin then
+				-- Verify the skin is unlocked
+				local heroDef = HeroConfig[heroId]
+				if heroDef.skins and heroDef.skins[profile.EquippedSkin] then
+					skinId = profile.EquippedSkin
+				end
+			end
+		end
+		local model = createRig(heroId, teamId, ownerId, guid, skinId)
 		model.Parent = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Heroes")
 
 		local spawnList = (teamId == Config.TEAM_RED) and Config.MAP.RED_SPAWN_PADS or Config.MAP.BLUE_SPAWN_PADS
@@ -359,29 +479,39 @@ function HeroSystem.SpawnHeroesForOwner(ownerId, teamId, deck, ownerPlayer)
 			UltimateChargeMax = 100,
 			NextFireAt = 0,
 			LastSwitchAt = 0,
-			InvulnerableUntil = 0,
-			MarkedUntil = 0,
-			MarkedByOwnerId = nil,
-			Sentry = nil,
-			Mines = {},
-			Stunned = false,
-			IsStealthed = false,
-			KillCount = 0,
-			DeathCount = 0,
-			AssistCount = 0,
-			DamageDealt = 0,
-			DamageTaken = 0,
-			-- Weapon skin tracking
-			WeaponSkin = heroDef.weaponSkin or "Default",
-			-- Selected skin
-			SkinEquipped = "default",
-			-- Status effects
-			ActiveEffects = {},
-			-- Last known position for AI tracking
-			LastKnownPosition = model.PrimaryPart.Position,
-			-- Shield value
-			ShieldHealth = 0,
-			MaxShield = 0,
+InvulnerableUntil = 0,
+		MarkedUntil = 0,
+		MarkedByOwnerId = nil,
+		Sentry = nil,
+		Mines = {},
+		Stunned = false,
+		IsStealthed = false,
+		KillCount = 0,
+		DeathCount = 0,
+		AssistCount = 0,
+		DamageDealt = 0,
+		DamageTaken = 0,
+		-- Weapon skin tracking
+		WeaponSkin = heroDef.weaponSkin or "Default",
+		-- Selected skin
+		SkinEquipped = "default",
+		-- Status effects
+		ActiveEffects = {},
+		-- Armor & Shield
+		Armor = 0,
+		MaxArmor = 100,
+		-- Power effect multipliers
+		DamageMultiplier = 1,
+		-- Last known position for AI tracking
+		LastKnownPosition = model.PrimaryPart.Position,
+		-- Shield value
+		ShieldHealth = 0,
+		MaxShield = 0,
+		-- Bomb defuse
+		HasBomb = false,
+		-- Economy (Bomb mode)
+		Money = 0,
+		SpentThisRound = 0,
 		}
 
 		HeroSystem.HeroesByGuid[guid] = hero
@@ -492,7 +622,6 @@ function HeroSystem.RespawnHero(hero)
 	hero.Alive = true
 	hero.Health = hero.MaxHealth
 	hero.ShieldHealth = hero.MaxShield
-	hero.Model:SetAttribute("Alive", true)
 	hero.Humanoid.MaxHealth = hero.MaxHealth
 	hero.Humanoid.Health = hero.MaxHealth
 	local weapon = WeaponConfig[hero.WeaponId]
@@ -501,21 +630,40 @@ function HeroSystem.RespawnHero(hero)
 	hero.IsReloading = false
 	hero.ReloadEndAt = 0
 	hero.AbilityReadyAt = os.clock()
-	hero.UltimateReadyAt = os.clock() + 60 -- Start with partial ultimate charge
+	hero.UltimateReadyAt = os.clock() + 60
 	hero.UltimateCharge = 50
 	hero.InvulnerableUntil = os.clock() + 2
 	hero.ActiveEffects = {}
+	hero.Stunned = false
+	hero.IsStealthed = false
+
+	-- Remove old model
+	if hero.Model then
+		for _, inst in ipairs(hero.Model:GetDescendants()) do
+			if inst:IsA("BasePart") then
+				HeroSystem.PartToHero[inst] = nil
+			end
+		end
+		hero.Model:Destroy()
+	end
+
+	local skinId = hero.SkinEquipped or "default"
+	local model = createRig(hero.HeroId, hero.TeamId, hero.OwnerId, hero.Guid, skinId)
+	model.Parent = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Heroes")
+	hero.Model = model
+	hero.Root = model.PrimaryPart
+	hero.Humanoid = model:FindFirstChildOfClass("Humanoid")
+	hero.Humanoid.MaxHealth = hero.MaxHealth
+	hero.Humanoid.Health = hero.MaxHealth
 
 	local spawnList = (hero.TeamId == Config.TEAM_RED) and Config.MAP.RED_SPAWN_PADS or Config.MAP.BLUE_SPAWN_PADS
 	local ffaList = Config.MAP.FFA_SPAWNS
-
 	local spawnPos
 	if MatchSystem.GameMode == "FFA" then
 		spawnPos = ffaList[math.random(1, #ffaList)]
 	else
 		spawnPos = spawnList[math.random(1, #spawnList)]
 	end
-
 	hero.Model:PivotTo(CFrame.new(spawnPos + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3))))
 
 	if hero.OwnerPlayer and not HeroSystem.GetControlledHero(hero.OwnerPlayer) then

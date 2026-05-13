@@ -16,7 +16,11 @@ local PICKUP_TYPES = {
 	Health = {respawnTime = 15, amount = 50},
 	Ammo = {respawnTime = 12, amount = 100},
 	Energy = {respawnTime = 18, amount = 30},
+	Armor = {respawnTime = 20, amount = 50},
 }
+
+local BURN_TICK_INTERVAL = 0.5
+local FREEZE_TICK_INTERVAL = 0.5
 
 local function getRemotes()
 	local root = ReplicatedStorage:FindFirstChild("PulseDeckArena")
@@ -83,6 +87,8 @@ end
 function CombatSystem.Init()
 	CombatSystem.Objectives = {}
 	CombatSystem.ActivePickups = {}
+	CombatSystem.BurningEffects = {}
+	CombatSystem.FrozenEffects = {}
 end
 
 function CombatSystem.CreateObjective(name, teamId, health, position)
@@ -330,6 +336,11 @@ function CombatSystem.ApplyDamage(attacker, target, amount, damageType, isHeadsh
 		end
 	end
 
+	-- Damage resistance from power
+	if target.ActiveEffects and target.ActiveEffects.power_damageresistance then
+		finalAmount = finalAmount * (1 - (target.ActiveEffects.power_damageresistance.reduction or 0))
+	end
+
 	-- Critical hit (10% chance)
 	local isCritical = math.random() < 0.1
 	if isCritical then
@@ -402,6 +413,12 @@ function CombatSystem.ApplyDamage(attacker, target, amount, damageType, isHeadsh
 			attackerProfile.XP = (attackerProfile.XP or 0) + 30
 		end
 
+		-- Economy money for bomb mode
+		if MatchSystem.GameMode == "Bomb" then
+			local reward = attacker.TeamId == Config.TEAM_RED and Config.BOMB_KILL_REWARD_CT or Config.BOMB_KILL_REWARD_T
+			attacker.Money = (attacker.Money or 0) + reward
+		end
+
 		local remotes = getRemotes()
 		local killfeed = remotes and remotes:FindFirstChild("KillfeedEvent")
 		if killfeed and killfeed:IsA("RemoteEvent") then
@@ -431,6 +448,16 @@ function CombatSystem.ApplyDamage(attacker, target, amount, damageType, isHeadsh
 		-- FFA kill tracking
 		if MatchSystem.GameMode == "FFA" then
 			MatchSystem.AddFFAKill(attacker.OwnerId)
+		end
+
+		-- Dispatch kill effect for the attacker's hero
+		local heroDef = HeroConfig[attacker.HeroId]
+		if heroDef and heroDef.killEffect then
+			fireEffect({
+				effectType = heroDef.killEffect,
+				position = target.Root.Position,
+				heroGuid = attacker.Guid,
+			})
 		end
 	end
 
@@ -927,6 +954,105 @@ function CombatSystem.FireWeapon(hero, direction)
 		return
 	end
 
+	-- === CHARGING PROJECTILE (e.g., Nova Launcher, Plasma Orb) ===
+	if weaponBehavior == "ChargingProjectile" then
+		local chargeTime = weapon.chargeTime or 1
+		local range = weapon.range or 500
+
+		-- Spawn projectile
+		local projectile = Instance.new("Part")
+		projectile.Name = "ChargingProjectile"
+		projectile.Size = Vector3.new(1.5, 1.5, 1.5)
+		projectile.Shape = Enum.PartType.Ball
+		projectile.Color = weapon.tracerColor or Color3.fromRGB(255, 100, 200)
+		projectile.Material = Enum.Material.Neon
+		projectile.Anchored = false
+		projectile.CanCollide = true
+		projectile.Position = origin
+
+		-- Glow
+		local glow = Instance.new("PointLight")
+		glow.Color = weapon.tracerColor
+		glow.Brightness = 3
+		glow.Range = 10
+		glow.Parent = projectile
+
+		local bodyVelocity = Instance.new("BodyVelocity")
+		bodyVelocity.Velocity = spreadDir * weapon.projectileSpeed
+		bodyVelocity.MaxForce = Vector3.new(1e6, 1e6, 1e6)
+		bodyVelocity.Parent = projectile
+
+		projectile.Parent = getEffectsFolder()
+
+		local startT = os.clock()
+
+		-- Travel and explode
+		local connection
+		connection = game:GetService("RunService").Heartbeat:Connect(function()
+			if not projectile or not projectile.Parent then
+				connection:Disconnect()
+				return
+			end
+
+			local elapsed = os.clock() - startT
+			if elapsed > (weapon.rangeLifetime or 3) then
+				connection:Disconnect()
+				projectile:Destroy()
+				return
+			end
+
+			-- Check for hits along the path
+			local rayParams = buildRayParams(hero)
+			local ray = workspace:Raycast(projectile.Position, projectile.Velocity * 0.05, rayParams)
+			if ray then
+				connection:Disconnect()
+
+				local hitPos = ray.Position
+
+				-- Check for objective hit
+				local objModel, objData = CombatSystem.GetObjectiveFromPart(ray.Instance)
+				if objModel and objData then
+					CombatSystem.DamageObjective(objModel, weapon.directDamage, hero.TeamId)
+				else
+					local hitHero = HeroSystem.GetHeroFromPart(ray.Instance)
+					if hitHero then
+						CombatSystem.ApplyDamage(hero, hitHero, weapon.directDamage)
+					end
+				end
+
+				-- Splash damage on impact
+				if weapon.splashRadius and weapon.splashDamage then
+					fireEffect({
+						effectType = "Explosion",
+						position = hitPos,
+						radius = weapon.splashRadius,
+						duration = 0.5,
+					})
+					for _, h in pairs(HeroSystem.HeroesByGuid) do
+						if h.Alive and h.TeamId ~= hero.TeamId then
+							local dist = (h.Root.Position - hitPos).Magnitude
+							if dist <= weapon.splashRadius then
+								local splashDmg = weapon.splashDamage * (1 - (dist / weapon.splashRadius) * 0.5)
+								CombatSystem.ApplyDamage(hero, h, math.floor(splashDmg))
+							end
+						end
+					end
+				end
+
+				projectile:Destroy()
+			end
+		end)
+
+		fireEffect({
+			effectType = "ChargingProjectile",
+			position = origin,
+			direction = spreadDir,
+			speed = weapon.projectileSpeed,
+			color = weapon.tracerColor,
+		})
+		return
+	end
+
 	-- Default hitscan
 	local range = weapon.range or 200
 	local ray = workspace:Raycast(origin, spreadDir * range, params)
@@ -954,6 +1080,25 @@ function CombatSystem.FireWeapon(hero, direction)
 		color = weapon.tracerColor,
 		duration = 0.08,
 	})
+end
+
+function CombatSystem.DamageRadius(ownerHero, position, radius, damage, objectiveMultiplier)
+	for _, hero in pairs(HeroSystem.HeroesByGuid) do
+		if hero.Alive and hero.TeamId ~= ownerHero.TeamId and (hero.Root.Position - position).Magnitude <= radius then
+			CombatSystem.ApplyDamage(ownerHero, hero, damage)
+		end
+	end
+
+	local objectivesFolder = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Objectives")
+	if objectivesFolder then
+		for _, model in ipairs(objectivesFolder:GetChildren()) do
+			if model:IsA("Model") and model.PrimaryPart and model:GetAttribute("ObjectiveTeam") ~= ownerHero.TeamId then
+				if (model.PrimaryPart.Position - position).Magnitude <= radius then
+					CombatSystem.DamageObjective(model, damage * (objectiveMultiplier or 1), ownerHero.TeamId)
+				end
+			end
+		end
+	end
 end
 
 function CombatSystem.CreatePickup(pickupType, position)

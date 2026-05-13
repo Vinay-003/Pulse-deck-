@@ -31,6 +31,8 @@ UIClient.AmmoLabel = nil
 UIClient.TimerLabel = nil
 UIClient.KillfeedContainer = nil
 UIClient.Notifications = nil
+UIClient.HUDTargets = {}
+UIClient.HUDSmoothing = {}
 
 -----------------------------------------------------
 -- HELPER FUNCTIONS
@@ -180,6 +182,16 @@ function UIClient.BuildMainMenu()
 		Color3.fromRGB(60, 140, 100), Color3.fromRGB(80, 170, 130))
 	quickBtn.MouseButton1Click:Connect(function()
 		ClientCore.Fire("RequestJoinQueue", {})
+	end)
+
+	-- Ready button
+	local readyBtn = createTextButton(screen, "✅ READY UP",
+		UDim2.new(0, 200, 0, 50), UDim2.new(0.5, -100, 0.65, 0),
+		Color3.fromRGB(60, 160, 80), Color3.fromRGB(80, 200, 100))
+	readyBtn.Font = Enum.Font.GothamBlack
+	readyBtn.TextSize = 16
+	readyBtn.MouseButton1Click:Connect(function()
+		ClientCore.Fire("RequestReady", {})
 	end)
 
 	-- Game mode buttons
@@ -414,6 +426,16 @@ function UIClient.BuildDeckSelect()
 	backBtn.MouseButton1Click:Connect(function()
 		UIClient.Show("MainMenu")
 	end)
+
+	-- Skin selector
+	local skinBtn = createTextButton(screen, "🎨 SKINS",
+		UDim2.new(0.15, 0, 0, 44), UDim2.new(0.85, 0, 0.925, 0),
+		Color3.fromRGB(120, 60, 180), Color3.fromRGB(160, 90, 220))
+	skinBtn.TextSize = 14
+	skinBtn.Font = Enum.Font.GothamSemibold
+	skinBtn.MouseButton1Click:Connect(function()
+		UIClient.ShowSkinPanel()
+	end)
 end
 
 function UIClient.UpdateDeckGrid()
@@ -433,6 +455,135 @@ function UIClient.UpdateDeckGrid()
 
 	if UIClient.DeckCountLabel then
 		UIClient.DeckCountLabel.Text = #UIClient.SelectedDeck .. " / " .. Config.DECK_SIZE .. " selected"
+	end
+end
+
+-----------------------------------------------------
+-- SKIN PANEL
+-----------------------------------------------------
+
+function UIClient.ShowSkinPanel()
+	-- Remove existing skin panel
+	if UIClient.SkinPanel then
+		UIClient.SkinPanel:Destroy()
+	end
+
+	local screen = UIClient.SkinPanel
+
+	local bg = createRoundedFrame(nil, "SkinPanel",
+		UDim2.new(0.7, 0, 0.8, 0),
+		UDim2.new(0.15, 0, 0.1, 0),
+		Color3.fromRGB(8, 10, 18, 240), 0.3, 12)
+	bg.Parent = UIClient.Gui
+	Instance.new("UICorner", bg)
+
+	-- Title
+	createTextLabel(bg, "SKIN SELECTION",
+		UDim2.new(1, 0, 0, 50), UDim2.new(0, 0, 0, 5),
+		22, Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	-- Close button
+	local closeBtn = createTextButton(bg, "✕",
+		UDim2.new(0, 40, 0, 36), UDim2.new(1, -50, 0, 8),
+		Color3.fromRGB(180, 50, 50), Color3.fromRGB(220, 70, 70))
+	closeBtn.TextSize = 18
+	closeBtn.Font = Enum.Font.GothamBold
+	closeBtn.MouseButton1Click:Connect(function()
+		bg:Destroy()
+		UIClient.SkinPanel = nil
+	end)
+
+	local frame = Instance.new("Frame")
+	frame.Size = UDim2.new(0.9, 0, 0.55, -40)
+	frame.Position = UDim2.new(0.05, 0, 0.15, 0)
+	frame.BackgroundTransparency = 1
+	frame.Parent = bg
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 4)
+	layout.Parent = frame
+
+	local heroId = (UIClient.SelectedDeck and #UIClient.SelectedDeck > 0)
+		and UIClient.SelectedDeck[1] or "bolt_runner"
+	local heroDef = HeroConfig[heroId]
+	local skins = heroDef and heroDef.skins or {}
+	local progression = ClientCore.State and ClientCore.State.progression
+
+	for skinId, skinDef in pairs(skins) do
+		local entry = Instance.new("Frame")
+		entry.Size = UDim2.new(1, 0, 0, 60)
+		entry.BackgroundColor3 = Color3.fromRGB(20, 22, 35)
+		entry.BorderSizePixel = 0
+		entry.LayoutOrder = (skinId == "default") and 0 or 1
+		Instance.new("UICorner", entry).CornerRadius = UDim.new(0, 6)
+		entry.Parent = frame
+
+		local outline = Instance.new("UIStroke")
+		outline.Color = Color3.fromRGB(60, 60, 80)
+		outline.Thickness = 1
+		outline.Parent = entry
+
+		-- Rarity badge
+		local rarity = skinDef.rarity or "Default"
+		local rarityColors = {
+			Default = Color3.fromRGB(160, 160, 170),
+			Common = Color3.fromRGB(180, 180, 180),
+			Rare = Color3.fromRGB(70, 130, 255),
+			Epic = Color3.fromRGB(180, 80, 220),
+			Legendary = Color3.fromRGB(255, 200, 50),
+		}
+		local rColor = rarityColors[rarity] or rarityColors.Default
+
+		local badge = createRoundedFrame(entry, "RarityBadge",
+			UDim2.new(0, 80, 0, 24), UDim2.new(0, 8, 0.5, -12),
+			rColor, 0.8, 4)
+		createTextLabel(badge, rarity,
+			UDim2.fromScale(1, 1), UDim2.new(0, 0, 0, 0), 11,
+			Color3.fromRGB(10, 10, 15), Enum.Font.GothamBold)
+
+		-- Skin name
+		createTextLabel(entry, skinId:gsub("^%l", string.upper),
+			UDim2.new(0.35, -8, 1, 0), UDim2.new(0, 96, 0, 0), 15,
+			Color3.fromRGB(240, 240, 250), Enum.Font.GothamSemibold)
+
+		-- Cost
+		local cost = 0
+		if rarity == "Common" then cost = 50
+		elseif rarity == "Rare" then cost = 200
+		elseif rarity == "Epic" then cost = 500
+		elseif rarity == "Legendary" then cost = 1500 end
+
+		createTextLabel(entry, "💎 " .. tostring(cost),
+			UDim2.new(0.15, 0, 1, 0), UDim2.new(0.5, 0, 0, 0), 14,
+			Color3.fromRGB(255, 222, 50), Enum.Font.GothamBold)
+
+		-- Equip button
+		local equipText = skinId == "default" and "EQUIPPED" or
+			(progression and table.find(progression.OwnedSkins or {}, heroId .. "_" .. skinId) and "OWNED" or "EQUIP")
+		local equipColor = skinId == "default" and Color3.fromRGB(80, 80, 100) or
+			Color3.fromRGB(60, 180, 100)
+		if equipText == "EQUIP" then
+			equipColor = Color3.fromRGB(255, 160, 40)
+		end
+
+		local equipBtn = createTextButton(entry, equipText,
+			UDim2.new(0, 100, 0, 36), UDim2.new(1, -116, 0.5, -18),
+			equipColor)
+		equipBtn.TextSize = 13
+		equipBtn.Font = Enum.Font.GothamBold
+		equipBtn.MouseButton1Click:Connect(function()
+			if skinId == "default" then return end
+			if equipText == "EQUIP" then
+				if progression and progression.Coins and progression.Coins >= cost then
+					ProgressionSystem.EquipSkin(nil, heroId, skinId)
+				elseif progression and table.find(progression.OwnedSkins or {}, heroId .. "_" .. skinId) then
+					ProgressionSystem.EquipSkin(nil, heroId, skinId)
+				end
+				bg:Destroy()
+				UIClient.SkinPanel = nil
+			end
+		end)
 	end
 end
 
@@ -558,11 +709,218 @@ function UIClient.BuildHUD()
 		UDim2.new(1, 0, 0, 24), UDim2.new(0, 0, 0, 2), 13,
 		Color3.fromRGB(180, 180, 200), Enum.Font.GothamSemibold)
 
+	-- Bomb mode HUD elements
+	UIClient.BombTimerLabel = createTextLabel(screen, "",
+		UDim2.new(0, 200, 0, 40), UDim2.new(0.5, -100, 0, 60), 28,
+		Color3.fromRGB(255, 220, 80), Enum.Font.GothamBlack)
+	UIClient.BombTimerLabel.Visible = false
+	UIClient.BombTimerLabel.ZIndex = 20
+
+	UIClient.RoundInfoLabel = createTextLabel(screen, "",
+		UDim2.new(0, 200, 0, 24), UDim2.new(0.5, -100, 0, 95), 16,
+		Color3.fromRGB(180, 190, 200), Enum.Font.GothamSemibold)
+	UIClient.RoundInfoLabel.Visible = false
+	UIClient.RoundInfoLabel.ZIndex = 20
+
+	UIClient.DefuseBar = createProgressBar(screen,
+		UDim2.new(0, 200, 0, 16), UDim2.new(0.5, -100, 0, 5),
+		Color3.fromRGB(50, 150, 255), Color3.fromRGB(15, 25, 45))
+	UIClient.DefuseBar.Visible = false
+	UIClient.DefuseBar.ZIndex = 20
+
+	UIClient.BombCarriedLabel = createTextLabel(screen, "BOMB CARRIER",
+		UDim2.new(0, 180, 0, 28), UDim2.new(0.5, -90, 0, 105), 14,
+		Color3.fromRGB(255, 200, 50), Enum.Font.GothamBold)
+	UIClient.BombCarriedLabel.Visible = false
+	UIClient.BombCarriedLabel.ZIndex = 20
+
 	-- Notification area
 	UIClient.NotificationArea = createRoundedFrame(screen, "Notifications",
 		UDim2.new(0, 350, 0, 100), UDim2.new(0, 10, 1, -110),
 		Color3.fromRGB(5, 5, 12, 180), 0.3, 8)
 	UIClient.NotificationArea.ZIndex = 15
+end
+
+-----------------------------------------------------
+-- BUY MENU (Bomb Mode)
+-----------------------------------------------------
+
+function UIClient.BuildBuyMenu()
+	local screen = UIClient.HUD
+
+	UIClient.BuyMenuFrame = createRoundedFrame(screen, "BuyMenu",
+		UDim2.new(0, 400, 0, 500), UDim2.new(0.5, -200, 0.5, -250),
+		Color3.fromRGB(10, 12, 20, 240), 0.3, 12)
+	UIClient.BuyMenuFrame.Visible = false
+	UIClient.BuyMenuFrame.ZIndex = 30
+
+	createTextLabel(UIClient.BuyMenuFrame, "BUY MENU",
+		UDim2.new(1, 0, 0, 40), UDim2.new(0, 0, 0, 5), 22,
+		Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	UIClient.BuyMoneyLabel = createTextLabel(UIClient.BuyMenuFrame, "$800",
+		UDim2.new(1, 0, 0, 28), UDim2.new(0, 0, 0, 40), 18,
+		Color3.fromRGB(100, 255, 150), Enum.Font.GothamBold)
+
+	local categories = {
+		{Pistols = {"twin_pistols", "shadow_pistols"}},
+		{SMGs = {"nano_smg", "phase_smg", "vortex_smg", "shadow_smg"}},
+		{Rifles = {"pulse_rifle", "storm_rifle", "plasma_rifle", "titan_rifle"}},
+		{Snipers = {"hunter_rifle", "rail_lance", "longbow"}},
+		{Shotguns = {"shotgun", "scatter_cannon", "pump_action"}},
+		{Special = {"arc_launcher", "flamethrower", "ion_beam"}},
+	}
+
+	local y = 75
+	local function getPrice(weaponId)
+		local Config = require(game:GetService("ReplicatedStorage"):WaitForChild("PulseDeckArena"):WaitForChild("Shared"):WaitForChild("Config"))
+		return Config.WEAPON_PRICES[weaponId] or 0
+	end
+
+	for _, catTable in ipairs(categories) do
+		for catName, weaponIds in pairs(catTable) do
+			local catLabel = createTextLabel(UIClient.BuyMenuFrame, catName,
+				UDim2.new(0.9, 0, 0, 20), UDim2.new(0.05, 0, 0, y), 13,
+				Color3.fromRGB(150, 160, 180), Enum.Font.GothamBold)
+			y += 22
+			for _, wid in ipairs(weaponIds) do
+				local price = getPrice(wid)
+				local btn = createTextButton(UIClient.BuyMenuFrame, wid .. " ($" .. tostring(price) .. ")",
+					UDim2.new(0.85, 0, 0, 28), UDim2.new(0.1, 0, 0, y),
+					Color3.fromRGB(35, 45, 65), Color3.fromRGB(55, 65, 85))
+				btn.TextSize = 12
+				btn.Font = Enum.Font.GothamSemibold
+				btn.ZIndex = 31
+				btn.MouseButton1Click:Connect(function()
+					ClientCore.Fire("RequestBuy", { weaponId = wid })
+				end)
+				y += 30
+			end
+		end
+	end
+
+	-- Close button
+	local closeBtn = createTextButton(UIClient.BuyMenuFrame, "CLOSE (B)",
+		UDim2.new(0.4, 0, 0, 34), UDim2.new(0.3, 0, 0.9, 0),
+		Color3.fromRGB(180, 50, 50), Color3.fromRGB(220, 70, 70))
+	closeBtn.TextSize = 14
+	closeBtn.ZIndex = 31
+	closeBtn.MouseButton1Click:Connect(function()
+		UIClient.BuyMenuFrame.Visible = false
+	end)
+end
+
+function UIClient.BuildShopUI()
+	local screen = UIClient.HUD
+	UIClient.ShopFrame = createRoundedFrame(screen, "ShopFrame",
+		UDim2.new(0, 500, 0, 500), UDim2.new(0.5, -250, 0.5, -250),
+		Color3.fromRGB(10, 12, 20, 240), 0.3, 12)
+	UIClient.ShopFrame.Visible = false
+	UIClient.ShopFrame.ZIndex = 40
+
+	createTextLabel(UIClient.ShopFrame, "SHOP",
+		UDim2.new(1, 0, 0, 40), UDim2.new(0, 0, 0, 5), 24,
+		Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	local coins = ProgressionUtils and 0 or 0
+	if ClientCore.State and ClientCore.State.progression then
+		coins = ClientCore.State.progression.Coins or 0
+	end
+	createTextLabel(UIClient.ShopFrame, "💎 " .. tostring(coins) .. " coins",
+		UDim2.new(1, 0, 0, 24), UDim2.new(0, 0, 0, 42), 16,
+		Color3.fromRGB(255, 222, 50), Enum.Font.GothamBold)
+
+	local shopItems = {
+		{name = "Assault Skin Bundle", price = 500, id = "skin_bundle_assault", cat = "Skins"},
+		{name = "Tank Skin Bundle", price = 500, id = "skin_bundle_tank", cat = "Skins"},
+		{name = "Mage Skin Bundle", price = 500, id = "skin_bundle_mage", cat = "Skins"},
+		{name = "500 Coins", price = 99, id = "coins_500", cat = "Currency"},
+		{name = "1500 Coins", price = 249, id = "coins_1500", cat = "Currency"},
+		{name = "4000 Coins", price = 599, id = "coins_4000", cat = "Currency"},
+	}
+
+	local y = 75
+	for _, item in ipairs(shopItems) do
+		local frame = createRoundedFrame(UIClient.ShopFrame, "ShopItem_" .. item.id,
+			UDim2.new(0.9, 0, 0, 36), UDim2.new(0.05, 0, 0, y),
+			Color3.fromRGB(20, 22, 35), 0.5, 6)
+		createTextLabel(frame, item.name .. " [" .. item.cat .. "]",
+			UDim2.new(0.6, 0, 1, 0), UDim2.new(0, 8, 0, 0), 14,
+			Color3.fromRGB(220, 220, 240))
+		createTextLabel(frame, "$" .. tostring(item.price),
+			UDim2.new(0.15, 0, 1, 0), UDim2.new(0.6, 0, 0, 0), 14,
+			Color3.fromRGB(255, 222, 50), Enum.Font.GothamBold)
+		local buyBtn = createTextButton(frame, "BUY",
+			UDim2.new(0.15, 0, 0, 28), UDim2.new(0.8, 0, 0.5, -14),
+			Color3.fromRGB(60, 180, 100))
+		buyBtn.TextSize = 12
+		buyBtn.MouseButton1Click:Connect(function()
+			ClientCore.Fire("RequestPurchase", { itemId = item.id })
+		end)
+		y += 40
+	end
+
+	local closeBtn = createTextButton(UIClient.ShopFrame, "CLOSE",
+		UDim2.new(0.3, 0, 0, 34), UDim2.new(0.35, 0, 0.9, 0),
+		Color3.fromRGB(180, 50, 50))
+	closeBtn.MouseButton1Click:Connect(function()
+		UIClient.ShopFrame.Visible = false
+	end)
+end
+
+function UIClient.BuildEmoteUI()
+	local screen = UIClient.HUD
+	UIClient.EmoteFrame = createRoundedFrame(screen, "EmoteFrame",
+		UDim2.new(0, 300, 0, 200), UDim2.new(0.5, -150, 0.5, -100),
+		Color3.fromRGB(10, 12, 20, 230), 0.3, 12)
+	UIClient.EmoteFrame.Visible = false
+	UIClient.EmoteFrame.ZIndex = 50
+
+	createTextLabel(UIClient.EmoteFrame, "EMOTES",
+		UDim2.new(1, 0, 0, 30), UDim2.new(0, 0, 0, 5), 18,
+		Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	local emotes = {"👍", "👋", "💪", "🔥", "😱", "🎉", "😎", "🧊"}
+	for i, emoji in ipairs(emotes) do
+		local col = (i - 1) % 4
+		local row = math.floor((i - 1) / 4)
+		local btn = createTextButton(UIClient.EmoteFrame, emoji,
+			UDim2.new(0, 60, 0, 60), UDim2.new(0, 10 + col * 70, 0, 40 + row * 70),
+			Color3.fromRGB(40, 44, 60))
+		btn.TextSize = 24
+		btn.TextColor3 = Color3.fromRGB(255, 255, 255)
+	end
+
+	local closeBtn = createTextButton(UIClient.EmoteFrame, "X",
+		UDim2.new(0, 30, 0, 30), UDim2.new(1, -40, 0, 5),
+		Color3.fromRGB(180, 50, 50))
+	closeBtn.MouseButton1Click:Connect(function()
+		UIClient.EmoteFrame.Visible = false
+	end)
+end
+
+function UIClient.BuildPracticeRangeUI()
+	local screen = UIClient.HUD
+	UIClient.PracticeFrame = createRoundedFrame(screen, "PracticeFrame",
+		UDim2.new(0, 200, 0, 100), UDim2.new(0.5, -100, 0.2, 0),
+		Color3.fromRGB(10, 12, 20, 200), 0.4, 10)
+	UIClient.PracticeFrame.Visible = false
+	UIClient.PracticeFrame.ZIndex = 30
+
+	createTextLabel(UIClient.PracticeFrame, "PRACTICE RANGE",
+		UDim2.new(1, 0, 0, 24), UDim2.new(0, 0, 0, 4), 16,
+		Color3.fromRGB(255, 200, 50), Enum.Font.GothamBlack)
+	createTextLabel(UIClient.PracticeFrame, "Dummy targets — test weapons",
+		UDim2.new(1, 0, 0, 20), UDim2.new(0, 0, 0, 28), 12,
+		Color3.fromRGB(150, 160, 180))
+
+	local spawnBtn = createTextButton(UIClient.PracticeFrame, "Spawn Dummy",
+		UDim2.new(0.8, 0, 0, 28), UDim2.new(0.1, 0, 0.6, 0),
+		Color3.fromRGB(60, 140, 100))
+	spawnBtn.TextSize = 12
+	spawnBtn.MouseButton1Click:Connect(function()
+		ClientCore.Fire("RequestPracticeDummy", {})
+	end)
 end
 
 -----------------------------------------------------
@@ -673,16 +1031,44 @@ function UIClient.ShowMatchResult(winnerText, duration)
 	screen.Visible = true
 
 	local bg = createRoundedFrame(screen, "ResultBG",
-		UDim2.new(0.5, 0, 0.5, 0), UDim2.new(0.25, 0, 0.25, 0),
+		UDim2.new(0.6, 0, 0.7, 0), UDim2.new(0.2, 0, 0.15, 0),
 		Color3.fromRGB(10, 12, 20, 220), 0.2, 14)
 
+	createTextLabel(bg, "MATCH OVER",
+		UDim2.new(1, 0, 0, 40), UDim2.new(0, 0, 0, 10), 22,
+		Color3.fromRGB(150, 160, 180), Enum.Font.GothamSemibold)
+
 	createTextLabel(bg, winnerText,
-		UDim2.new(1, 0, 0, 80), UDim2.new(0, 0, 0.25, 0), 48,
+		UDim2.new(1, 0, 0, 60), UDim2.new(0, 0, 0, 45), 42,
 		Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
 
+	local localUserId = Players.LocalPlayer.UserId
+	local stats = {kills = 0, deaths = 0, damage = 0, score = 0, hero = "Unknown"}
+	for _, hero in pairs(ClientCore.State.heroes or {}) do
+		if hero.ownerUserId == localUserId then
+			stats.kills = hero.killCount or 0
+			stats.deaths = hero.deathCount or 0
+			stats.damage = hero.damageDealt or 0
+			stats.hero = (hero.heroId or ""):gsub("_", " "):gsub("(%l)(%w+)", function(a,b) return a:upper()..b end)
+			break
+		end
+	end
+
+	local scoreText = string.format("Kills: %d  |  Deaths: %d  |  Damage: %d  |  K/D: %.2f",
+		stats.kills, stats.deaths, stats.damage, stats.kills / math.max(1, stats.deaths))
+	createTextLabel(bg, scoreText,
+		UDim2.new(0.9, 0, 0, 28), UDim2.new(0.05, 0, 0.45, 0), 18,
+		Color3.fromRGB(200, 210, 230), Enum.Font.GothamSemibold)
+
+	createTextLabel(bg, "Hero: " .. stats.hero,
+		UDim2.new(0.9, 0, 0, 24), UDim2.new(0.05, 0, 0.52, 0), 16,
+		Color3.fromRGB(180, 190, 210), Enum.Font.Gotham)
+
 	createTextLabel(bg, "Returning to menu in " .. tostring(math.floor(duration)) .. "s...",
-		UDim2.new(1, 0, 0, 30), UDim2.new(0, 0, 0.6, 0), 18,
-		Color3.fromRGB(180, 180, 200), Enum.Font.GothamSemibold)
+		UDim2.new(1, 0, 0, 30), UDim2.new(0, 0, 0.75, 0), 16,
+		Color3.fromRGB(120, 130, 150), Enum.Font.Gotham)
+
+	task.spawn(animateScreenIn, screen, 0.3)
 end
 
 -----------------------------------------------------
@@ -730,12 +1116,45 @@ end
 -- SHOW/HIDE
 -----------------------------------------------------
 
+local RunService = game:GetService("RunService")
+
+local function animateScreenIn(screen, duration)
+	local bg = screen:FindFirstChildOfClass("Frame")
+	if not bg then return end
+	local ogSize = bg.Size
+	local ogTrans = bg.BackgroundTransparency
+	bg.Size = UDim2.new(ogSize.X.Scale * 0.5, ogSize.X.Offset, ogSize.Y.Scale, ogSize.Y.Offset)
+	bg.BackgroundTransparency = 1
+	local t1 = TweenService:Create(bg, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = ogSize, BackgroundTransparency = ogTrans,
+	})
+	t1:Play()
+end
+
+local function animateScreenOut(screen, duration)
+	local bg = screen:FindFirstChildOfClass("Frame")
+	if not bg then return end
+	local ogSize = bg.Size
+	local t1 = TweenService:Create(bg, TweenInfo.new(duration or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Size = UDim2.new(ogSize.X.Scale * 0.5, ogSize.X.Offset, ogSize.Y.Scale, ogSize.Y.Offset),
+		BackgroundTransparency = 1,
+	})
+	t1:Play()
+	t1.Completed:Wait()
+end
+
 function UIClient.Show(screenName)
 	for _, screen in ipairs({
 		UIClient.MainMenu, UIClient.DeckSelect, UIClient.HUD,
 		UIClient.Scoreboard, UIClient.PostMatch
 	}) do
-		if screen then screen.Visible = screen.Name == screenName end
+		if screen then
+			local wasVisible = screen.Visible
+			screen.Visible = screen.Name == screenName
+			if screen.Visible and not wasVisible then
+				task.spawn(animateScreenIn, screen, 0.25)
+			end
+		end
 	end
 end
 
@@ -766,6 +1185,29 @@ function UIClient.BindState()
 			local minutes = math.floor(timer / 60)
 			local seconds = timer % 60
 			UIClient.TimerLabel.Text = string.format("%d:%02d", minutes, seconds)
+		end
+
+		if payload.gameMode == "Bomb" then
+			if UIClient.RoundInfoLabel then
+				UIClient.RoundInfoLabel.Visible = true
+				local ctScore = payload.roundScore and payload.roundScore.Red or 0
+				local tScore = payload.roundScore and payload.roundScore.Blue or 0
+				UIClient.RoundInfoLabel.Text = string.format("CT %d - %d T | Round %d/%d", ctScore, tScore, payload.roundNumber or 1, 15)
+			end
+			if UIClient.BombTimerLabel then
+				UIClient.BombTimerLabel.Visible = payload.bombState == "Planted"
+				if payload.bombState == "Planted" and payload.bombTimer then
+					UIClient.BombTimerLabel.Text = string.format(" %d:%02d", math.floor(payload.bombTimer / 60), payload.bombTimer % 60)
+				end
+			end
+			if UIClient.BombCarriedLabel then
+				UIClient.BombCarriedLabel.Visible = payload.hasBomb == true
+			end
+		else
+			if UIClient.RoundInfoLabel then UIClient.RoundInfoLabel.Visible = false end
+			if UIClient.BombTimerLabel then UIClient.BombTimerLabel.Visible = false end
+			if UIClient.DefuseBar then UIClient.DefuseBar.Visible = false end
+			if UIClient.BombCarriedLabel then UIClient.BombCarriedLabel.Visible = false end
 		end
 
 		if UIClient.ModeLabel then
@@ -807,30 +1249,29 @@ function UIClient.BindState()
 				-- Update HUD stats for controlled hero
 				if hero.isControlled then
 					if UIClient.HealthBarFill then
-						local hp = hero.health / hero.maxHealth
-						UIClient.HealthBarFill.Size = UDim2.new(hp, 0, 1, 0)
-						UIClient.HealthBarFill.BackgroundColor3 = Color3.fromRGB(
-							255 - hp * 155, 20 + hp * 180, 20 + hp * 30
-						)
+						local hp = (hero.health or 0) / math.max(1, hero.maxHealth or 1)
+						UIClient.HUDTargets.health = hp
 					end
 
-					if UIClient.ShieldBarFill and hero.maxShield and hero.maxShield > 0 then
-						local sp = hero.shieldHealth / hero.maxShield
-						UIClient.ShieldBarFill.Size = UDim2.new(sp, 0, 1, 0)
+					if UIClient.ShieldBarFill and (hero.shieldHealth or 0) > 0 then
+						local sp = (hero.shieldHealth or 0) / math.max(1, hero.maxShield or 1)
+						UIClient.HUDTargets.shield = sp
+					elseif UIClient.ShieldBarFill then
+						UIClient.HUDTargets.shield = 0
 					end
 
 					if UIClient.AbilityBarFill then
-						local cd = hero.abilityCooldownRemaining or 10
+						local cd = hero.abilityCooldownRemaining or 0
 						local fullCd = 10
 						local heroAbCfg = AbilityConfig[hero.heroId]
 						if heroAbCfg then fullCd = heroAbCfg.cooldown end
-						local pct = 1 - (cd / fullCd)
-						UIClient.AbilityBarFill.Size = UDim2.new(math.clamp(pct, 0, 1), 0, 1, 0)
+						local pct = 1 - (cd / math.max(1, fullCd))
+						UIClient.HUDTargets.ability = math.clamp(pct, 0, 1)
 					end
 
 					if UIClient.UltimateBarFill then
 						local pct = (hero.ultimateCharge or 0) / 100
-						UIClient.UltimateBarFill.Size = UDim2.new(pct, 0, 1, 0)
+						UIClient.HUDTargets.ultimate = pct
 					end
 
 					if UIClient.AmmoLabel then
@@ -937,6 +1378,29 @@ function UIClient.BindState()
 				frame:Destroy()
 			end
 		end)
+	end)
+
+	ClientCore.Events.BuyMenuResponse = ClientCore.Events.BuyMenuResponse or Instance.new("BindableEvent")
+	ClientCore.Events.BuyMenuResponse.Event:Connect(function(payload)
+		if not UIClient.BuyMenuFrame then return end
+		if payload.money then
+			UIClient.BuyMenuFrame.Visible = not UIClient.BuyMenuFrame.Visible
+			if UIClient.BuyMoneyLabel then
+				UIClient.BuyMoneyLabel.Text = "$" .. tostring(payload.money)
+			end
+		end
+	end)
+
+	ClientCore.Events.BombDefuseProgress = ClientCore.Events.BombDefuseProgress or Instance.new("BindableEvent")
+	ClientCore.Events.BombDefuseProgress.Event:Connect(function(payload)
+		if not UIClient.DefuseBar then return end
+		local pct = math.max(0, payload.progress or 0)
+		if pct <= 0 then
+			UIClient.DefuseBar.Visible = false
+		else
+			UIClient.DefuseBar.Visible = true
+			UIClient.DefuseBarFill.Size = UDim2.new(pct, 0, 1, 0)
+		end
 	end)
 
 	ClientCore.Events.Scoreboard.Event:Connect(function(payload)
@@ -1104,11 +1568,47 @@ function UIClient.Init()
 	UIClient.BuildMainMenu()
 	UIClient.BuildDeckSelect()
 	UIClient.BuildHUD()
+	UIClient.BuildBuyMenu()
+	UIClient.BuildShopUI()
+	UIClient.BuildEmoteUI()
+	UIClient.BuildPracticeRangeUI()
 	UIClient.BuildScoreboard()
 	UIClient.BuildPostMatch()
 	UIClient.BindState()
 
 	UIClient.Show("MainMenu")
+
+	-- HUD bar smooth lerping on RenderStepped
+	UIClient.HUDTargets = {
+		health = 1, shield = 0, ability = 0, ultimate = 0,
+	}
+	UIClient.HUDSmoothing = {health = 1, shield = 0, ability = 0, ultimate = 0}
+
+	RunService.RenderStepped:Connect(function()
+		local t = UIClient.HUDTargets
+		local s = UIClient.HUDSmoothing
+		local rate = 0.12
+
+		s.health = s.health + (t.health - s.health) * rate
+		s.shield = s.shield + (t.shield - s.shield) * rate
+		s.ability = s.ability + (t.ability - s.ability) * rate
+		s.ultimate = s.ultimate + (t.ultimate - s.ultimate) * rate
+
+		if UIClient.HealthBarFill then
+			UIClient.HealthBarFill.Size = UDim2.new(s.health, 0, 1, 0)
+			UIClient.HealthBarFill.BackgroundColor3 = Color3.fromRGB(
+				255 - s.health * 155, 20 + s.health * 180, 20 + s.health * 30)
+		end
+		if UIClient.ShieldBarFill then
+			UIClient.ShieldBarFill.Size = UDim2.new(s.shield, 0, 1, 0)
+		end
+		if UIClient.AbilityBarFill then
+			UIClient.AbilityBarFill.Size = UDim2.new(s.ability, 0, 1, 0)
+		end
+		if UIClient.UltimateBarFill then
+			UIClient.UltimateBarFill.Size = UDim2.new(s.ultimate, 0, 1, 0)
+		end
+	end)
 end
 
 return UIClient

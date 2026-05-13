@@ -42,6 +42,7 @@ local Config = {
 		armor = Color3.fromRGB(100, 200, 255),
 	},
 	FFA_ENABLED = true,
+	BOMB_ENABLED = true,
 	KOTH_ENABLED = true,
 	CTF_ENABLED = true,
 	FRIENDLY_FIRE_ENABLED = false,
@@ -75,6 +76,47 @@ local Config = {
 	XP_LOSS = 50,
 	XP_DRAW = 80,
 	XP_FIRST_BLOOD = 50,
+
+	BOMB_PLANT_TIME = 3,
+	BOMB_DEFUSE_TIME = 5,
+	BOMB_EXPLODE_TIME = 40,
+	BOMB_MAX_ROUNDS = 15,
+	BOMB_ROUND_TIME = 105,
+	BOMB_BUY_TIME = 20,
+	BOMB_SWAP_ROUND = 8,
+	BOMB_PLANT_REWARD = 300,
+	BOMB_DEFUSE_REWARD = 300,
+	BOMB_KILL_REWARD_CT = 200,
+	BOMB_KILL_REWARD_T = 300,
+	BOMB_WIN_REWARD = 3000,
+	BOMB_LOSS_REWARD_BASE = 1400,
+	BOMB_LOSS_REWARD_INCREMENT = 500,
+	BOMB_EXPLODE_REWARD = 300,
+	BOMB_DEFUSAL_HALFWAY = 0.5,
+	BOMB_SITES = {
+		A = Vector3.new(-80, 3, 0),
+		B = Vector3.new(80, 3, 0),
+	},
+	BOMB_SPAWN_CT = {Vector3.new(-140, 3, 50), Vector3.new(-140, 3, -50), Vector3.new(-135, 3, 0)},
+	BOMB_SPAWN_T = {Vector3.new(140, 3, 50), Vector3.new(140, 3, -50), Vector3.new(135, 3, 0)},
+	BOMB_BUY_ZONE_CT = {Vector3.new(-145, 1, 0)},
+	BOMB_BUY_ZONE_T = {Vector3.new(145, 1, 0)},
+
+	-- === ECONOMY: Weapon prices (Bomb mode) ===
+	WEAPON_PRICES = {
+		pulse_rifle = 2000, storm_rifle = 2200, plasma_rifle = 2400, titan_rifle = 2800,
+		nano_smg = 600, vortex_smg = 800, shadow_smg = 1000,
+		scatter_cannon = 900, dual_blasters = 1000, pump_action = 1200,
+		rail_lance = 4000, longbow = 4500, hunter_rifle = 3500,
+		arc_launcher = 2000, flamethrower = 1800, cryo_rifle = 2200,
+		ion_beam = 1500, rivet_carbine = 1600, phase_smg = 700,
+		bio_rifle = 1200, lightning_gun = 2500, cluster_mortar = 3000,
+		shotgun = 800, shadow_rifle = 1700, plasma_caster = 2000,
+		vortex_rifle = 1600, gravity_hammer = 2200, energy_sword = 1800,
+		twin_pistols = 400, shadow_pistols = 600,
+	},
+	STARTING_MONEY = 800,
+	MAX_MONEY = 10000,
 
 	-- === MAP CONFIG ===
 	MAP = {
@@ -135,10 +177,12 @@ local Config = {
 
 	PRESETS = {
 		assault = {"bolt_runner", "nova", "glitch_byte", "fuse_jack", "reaper", "pyro_blazer", "vector"},
-		defense = {"iron_bulwark", "terra_pin", "wisp_ion", "vesper_scope", "bastion", "sentinel", "berserker"},
+		defense = {"iron_bulwark", "terra_pin", "wisp_ion", "vesper_scope", "bastion", "berserker", "medic"},
 		balanced = {"bolt_runner", "iron_bulwark", "vesper_scope", "patch_flux", "fuse_jack", "medic", "chrono"},
-		sniper = {"vesper_scope", "storm_sniper", "nova", "glitch_byte", "bolt_runner"},
-		chaos = {"glitch_byte", "reaper", "fuse_jack", "wisp_ion", "nova", "phoenix", "havoc"},
+		storm_sniper = {
+			"storm_sniper", "nova", "glitch_byte", "bolt_runner", "vesper_scope"
+		},
+		chaos = {"glitch_byte", "reaper", "fuse_jack", "wisp_ion", "nova", "phoenix", "berserker"},
 	},
 
 	DEFAULT_DECK = {"bolt_runner", "iron_bulwark", "vesper_scope", "patch_flux", "fuse_jack"},
@@ -149,6 +193,29 @@ local Config = {
 	MAX_HEALTH_KITS = 5,
 	MAX_AMMO_CRATES = 5,
 	MAX_ARMOR_STATIONS = 3,
+
+	-- === BATTLE PASS ===
+	BP_XP_PER_TIER_BASE = 500,
+	BP_XP_INCREMENT = 150,
+	BP_MAX_TIER = 50,
+	BP_PREMIUM_COST = 1500,
+
+	-- === SHOP ===
+	SHOP_ITEMS = {
+		-- Skin bundles
+		{id = "skin_bundle_assault", name = "Assault Skin Bundle", price = 500, items = {"bolt_runner_gold", "nova_stellar"}, category = "Skins"},
+		{id = "skin_bundle_tank", name = "Tank Skin Bundle", price = 500, items = {"iron_bulwark_titanium", "bastion_ironclad"}, category = "Skins"},
+		{id = "skin_bundle_mage", name = "Mage Skin Bundle", price = 500, items = {"phoenix_solar", "cryomancer_frostbitten"}, category = "Skins"},
+		-- Individual skins
+		{id = "skin_legendary", name = "Random Legendary Skin", price = 1500, items = {}, category = "Skins"},
+		-- Hero unlocks
+		{id = "hero_unlock", name = "Unlock Random Hero", price = 400, items = {}, category = "Heroes"},
+		-- Currency
+		{id = "coins_500", name = "500 Coins", price = 99, items = {}, category = "Currency"},
+		{id = "coins_1500", name = "1500 Coins", price = 249, items = {}, category = "Currency"},
+		{id = "coins_4000", name = "4000 Coins", price = 599, items = {}, category = "Currency"},
+	},
+	SHOP_CATEGORIES = {"Skins", "Heroes", "Currency"},
 }
 
 return Config

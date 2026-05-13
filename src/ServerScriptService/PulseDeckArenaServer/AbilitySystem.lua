@@ -15,10 +15,12 @@ AbilitySystem.MatchSystem = nil
 AbilitySystem.CombatSystem = nil
 AbilitySystem.ActiveDomes = {}
 AbilitySystem.SlowFields = {}
+AbilitySystem.ActiveSlowFields = {}
 AbilitySystem.Sentries = {}
 AbilitySystem.GravityWells = {}
 AbilitySystem.EnergyShields = {}
 AbilitySystem.ActiveHealingFields = {}
+AbilitySystem.ActiveMines = {}
 
 local function getEffectsFolder()
 	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
@@ -511,9 +513,66 @@ function AbilitySystem.UseAbility(hero, payload)
 			duration = cfg.duration,
 			heroGuid = hero.Guid,
 		})
-	end
 
-	hero.AbilityReadyAt = now + cfg.cooldown
+	-- === MOBILITY: ADRENALINE ===
+	elseif cfg.id == "adrenaline" then
+		hero.ActiveEffects.adrenaline = {
+			ExpireAt = now + cfg.duration,
+			SpeedMultiplier = cfg.speedMultiplier,
+			FireRateMultiplier = cfg.fireRateMultiplier,
+		}
+		effectAll({
+			effectType = "OverchargeAura",
+			position = hero.Root.Position,
+			color = Color3.fromRGB(255, 200, 50),
+			duration = cfg.duration,
+			radius = 3,
+		})
+
+	-- === MOBILITY: BERSERK ===
+	elseif cfg.id == "berserk" then
+		hero.ActiveEffects.berserk = {
+			ExpireAt = now + cfg.duration,
+			DamageMultiplier = cfg.damageMultiplier,
+			DamageReduction = cfg.damageReduction,
+			SpeedMultiplier = cfg.speedMultiplier or 1.0,
+		}
+		effectAll({
+			effectType = "BerserkAura",
+			position = hero.Root.Position,
+			color = Color3.fromRGB(255, 0, 0),
+			duration = cfg.duration,
+			radius = 4,
+		})
+
+	-- === MOBILITY: VAULT ===
+	elseif cfg.id == "vault" then
+		local goal = hero.Root.Position + dir * cfg.dashDistance
+		goal = Vector3.new(goal.X, goal.Y + cfg.jumpBoost, goal.Z)
+		hero.InvulnerableUntil = now + cfg.invulnerabilitySeconds
+		hero.Root.CFrame = CFrame.new(goal, goal + dir)
+		hero.Humanoid.Velocity = Vector3.new(0, cfg.jumpBoost * 3, 0)
+		effectAll({effectType = "Blink", position = hero.Root.Position, endPosition = goal, duration = 0.3, color = cfg.trailColor})
+
+-- === MOBILITY: PHOENIX DIVE ===
+	elseif cfg.id == "phoenix_dive" then
+		local skyPos = hero.Root.Position + Vector3.new(0, 80, 0)
+		hero.Root.CFrame = CFrame.new(skyPos)
+		hero.Root.Velocity = Vector3.new(0, -100, 0)
+		hero.ActiveEffects.phoenixDiving = true
+		task.delay(2, function()
+			if hero.ActiveEffects then hero.ActiveEffects.phoenixDiving = nil end
+		end)
+		effectAll({
+			effectType = "PhoenixDive",
+			position = hero.Root.Position,
+			radius = cfg.blastRadius,
+			duration = 1,
+			color = Color3.fromRGB(255, 100, 0),
+		})
+		-- Impact handled in UpdateTimedAbilities when phoenixDiving flag is set
+
+	-- === STEALTH: CLOAK AND DAGGER ===
 end
 
 function AbilitySystem.UseUltimate(hero)
@@ -657,10 +716,12 @@ end
 function AbilitySystem.Clear()
 	AbilitySystem.ActiveDomes = {}
 	AbilitySystem.SlowFields = {}
+	AbilitySystem.ActiveSlowFields = {}
 	AbilitySystem.Sentries = {}
 	AbilitySystem.GravityWells = {}
 	AbilitySystem.EnergyShields = {}
 	AbilitySystem.ActiveHealingFields = {}
+	AbilitySystem.ActiveMines = {}
 	local effects = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Effects")
 	if effects then
 		effects:ClearAllChildren()
