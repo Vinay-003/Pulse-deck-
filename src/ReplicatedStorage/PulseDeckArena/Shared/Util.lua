@@ -1,4 +1,3 @@
---!strict
 
 local RunService = game:GetService("RunService")
 

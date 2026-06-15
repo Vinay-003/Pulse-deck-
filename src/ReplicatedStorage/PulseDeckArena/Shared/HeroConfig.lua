@@ -1,4 +1,3 @@
---!strict
 
 -- Pulse Deck Arena - Hero Configuration
 -- Each hero has unique stats, weapons, abilities, cosmetics, and powers

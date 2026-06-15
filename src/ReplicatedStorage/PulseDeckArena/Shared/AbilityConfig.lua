@@ -1,4 +1,3 @@
---!strict
 
 -- Pulse Deck Arena v2 - Ability Configuration
 -- 29 abilities across all kinds

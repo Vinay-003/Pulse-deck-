@@ -1,4 +1,3 @@
---!strict
 
 local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
 local UIClient = require(script.Parent:WaitForChild("UIClient"))

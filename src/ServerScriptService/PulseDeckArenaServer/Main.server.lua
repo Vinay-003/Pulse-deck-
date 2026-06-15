@@ -1,4 +1,3 @@
---!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
@@ -34,6 +33,24 @@ local function ensureWorld()
 end
 
 ensureWorld()
+
+MapBuilder.BuildNeonFoundry()
+
+CombatSystem.Init()
+do
+	local objectivesFolder = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Objectives")
+	for _, child in ipairs(objectivesFolder:GetChildren()) do
+		if child.Name == "RedCore" then
+			CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.CORE_MAX_HEALTH, "Core")
+		elseif child.Name == "BlueCore" then
+			CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.CORE_MAX_HEALTH, "Core")
+		elseif string.find(child.Name, "RedGenerator") then
+			CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.GENERATOR_MAX_HEALTH, "Generator")
+		elseif string.find(child.Name, "BlueGenerator") then
+			CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.GENERATOR_MAX_HEALTH, "Generator")
+		end
+	end
+end
 
 -- Create remote folder
 local remotesFolder = ReplicatedStorage:FindFirstChild("PulseDeckArena") and ReplicatedStorage.PulseDeckArena:FindFirstChild("Remotes")

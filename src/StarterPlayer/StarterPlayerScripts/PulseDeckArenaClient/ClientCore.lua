@@ -1,4 +1,3 @@
---!strict
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
 local CameraClient = require(script.Parent:WaitForChild("CameraClient"))

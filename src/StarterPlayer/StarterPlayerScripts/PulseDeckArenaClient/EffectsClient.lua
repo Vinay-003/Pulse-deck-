@@ -1,4 +1,3 @@
---!strict
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Debris = game:GetService("Debris")

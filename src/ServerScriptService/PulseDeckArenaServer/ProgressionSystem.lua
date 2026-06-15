@@ -1,4 +1,3 @@
---!strict
 
 local DataStoreService = game:GetService("DataStoreService")
 

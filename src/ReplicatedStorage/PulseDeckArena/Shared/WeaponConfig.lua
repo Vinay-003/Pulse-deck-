@@ -1,4 +1,3 @@
---!strict
 
 -- Pulse Deck Arena v2 - Weapon Configuration
 -- 38 weapons across all behavior types

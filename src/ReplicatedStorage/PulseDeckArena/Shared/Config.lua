@@ -1,4 +1,3 @@
---!strict
 local Config = {
 	GAME_NAME = "PULSE DECK ARENA v2",
 	MATCH_DURATION = 360,
