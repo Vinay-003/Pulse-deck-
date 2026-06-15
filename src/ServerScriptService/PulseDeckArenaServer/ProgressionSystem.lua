@@ -1,7 +1,8 @@
 
 local DataStoreService = game:GetService("DataStoreService")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
-local sharedRoot = script.Parent.Parent:WaitForChild("Shared")
+local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
 local ProgressionUtils = require(sharedRoot:WaitForChild("ProgressionUtils"))
 local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
