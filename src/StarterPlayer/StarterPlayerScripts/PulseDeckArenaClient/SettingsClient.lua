@@ -120,16 +120,20 @@ function SettingsClient.ApplyGraphicsPreset(preset)
 	local p = PRESETS[preset] or PRESETS.High
 
 	-- FPS cap
-	RunService:SetFPSLimit(p.fps or 60)
+	local fpsCapOk = pcall(function()
+		if setfpscap then setfpscap(p.fps or 60) end
+	end)
 	SettingsClient.FPSCap = p.fps
 
 	-- UserGameSettings quality
-	local ugs = UserInputService.UserGameSettings
-	ugs.SavedQualityLevel = (preset == "Low") and Enum.SavedQualitySetting.QualityLevel1
-		or (preset == "Medium") and Enum.SavedQualitySetting.QualityLevel3
-		or (preset == "High") and Enum.SavedQualitySetting.QualityLevel7
-		or (preset == "Ultra") and Enum.SavedQualitySetting.QualityLevel10
-		or Enum.SavedQualitySetting.Automatic
+	local ugsOk, ugs = pcall(function() return UserInputService.UserGameSettings end)
+	if ugsOk and ugs then
+		ugs.SavedQualityLevel = (preset == "Low") and Enum.SavedQualitySetting.QualityLevel1
+			or (preset == "Medium") and Enum.SavedQualitySetting.QualityLevel3
+			or (preset == "High") and Enum.SavedQualitySetting.QualityLevel7
+			or (preset == "Ultra") and Enum.SavedQualitySetting.QualityLevel10
+			or Enum.SavedQualitySetting.Automatic
+	end
 
 	-- Lighting
 	Lighting.Ambient = p.ambient or Color3.fromRGB(55, 60, 80)
@@ -176,15 +180,17 @@ function SettingsClient.ApplyGraphicsPreset(preset)
 
 	-- Atmosphere
 	if SettingsClient.PostFX.Atmosphere then
-		SettingsClient.PostFX.Atmosphere.Enabled = p.atmosphere
-		if p.atmosphere then
-			SettingsClient.PostFX.Atmosphere.Density = p.density or 0.15
-			SettingsClient.PostFX.Atmosphere.Offset = p.offset or 0.5
-			SettingsClient.PostFX.Atmosphere.Color = Color3.fromRGB(40, 45, 60)
-			SettingsClient.PostFX.Atmosphere.Decay = Color3.fromRGB(20, 22, 30)
-			SettingsClient.PostFX.Atmosphere.Glare = p.glare or 0.1
-			SettingsClient.PostFX.Atmosphere.Haze = p.haze or 0.5
-		end
+		local okAtm = pcall(function()
+			SettingsClient.PostFX.Atmosphere.Enabled = p.atmosphere
+			if p.atmosphere then
+				SettingsClient.PostFX.Atmosphere.Density = p.density or 0.15
+				SettingsClient.PostFX.Atmosphere.Offset = p.offset or 0.5
+				SettingsClient.PostFX.Atmosphere.Color = Color3.fromRGB(40, 45, 60)
+				SettingsClient.PostFX.Atmosphere.Decay = Color3.fromRGB(20, 22, 30)
+				SettingsClient.PostFX.Atmosphere.Glare = p.glare or 0.1
+				SettingsClient.PostFX.Atmosphere.Haze = p.haze or 0.5
+			end
+		end)
 	end
 
 	SettingsClient.Save()
@@ -192,7 +198,7 @@ end
 
 function SettingsClient.SetFPSCap(fps)
 	SettingsClient.FPSCap = fps
-	RunService:SetFPSLimit(fps)
+	pcall(function() if setfpscap then setfpscap(fps) end end)
 	SettingsClient.Save()
 end
 

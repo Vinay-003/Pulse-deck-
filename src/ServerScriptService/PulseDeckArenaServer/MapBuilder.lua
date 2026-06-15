@@ -177,7 +177,8 @@ function MapBuilder.BuildNeonFoundry()
 		plat.Parent = mapFolder
 
 		-- Railings
-		for _, offset in ipairs({{8, 0, 0}, {-8, 0, 0}, {0, 0, 8}, {0, 0, -8}}) do
+		for _, off in ipairs({{8, 0, 0}, {-8, 0, 0}, {0, 0, 8}, {0, 0, -8}}) do
+			local offset = Vector3.new(off[1], off[2], off[3])
 			local rail = Util.MakePart(sp.name .. "_Rail", Vector3.new(0.3, 3, 0.3), sp.pos + offset, Color3.fromRGB(100, 120, 140), Enum.Material.Metal, true)
 			rail.Parent = mapFolder
 		end
@@ -341,15 +342,15 @@ function MapBuilder.BuildNeonFoundry()
 	kothBeam.CanCollide = false
 	kothBeam.Parent = mapFolder
 
-	-- Lighting
-	Lighting.ClockTime = 20
-	Lighting.Brightness = 2
-	Lighting.Ambient = Color3.fromRGB(55, 60, 80)
-	Lighting.OutdoorAmbient = Color3.fromRGB(30, 35, 50)
-	Lighting.EnvironmentDiffuseScale = 0.4
-	Lighting.EnvironmentSpecularScale = 0.6
-	Lighting.FogColor = Color3.fromRGB(15, 18, 25)
-	Lighting.FogEnd = 400
+	-- Lighting — daytime bright neon-arena look
+	Lighting.ClockTime = 14
+	Lighting.Brightness = 3
+	Lighting.Ambient = Color3.fromRGB(80, 85, 105)
+	Lighting.OutdoorAmbient = Color3.fromRGB(60, 65, 85)
+	Lighting.EnvironmentDiffuseScale = 0.5
+	Lighting.EnvironmentSpecularScale = 0.7
+	Lighting.FogColor = Color3.fromRGB(25, 28, 35)
+	Lighting.FogEnd = 500
 
 	-- Post-processing atmosphere
 	local atmosphere = Instance.new("Atmosphere")

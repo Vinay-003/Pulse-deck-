@@ -11,14 +11,19 @@ local EffectsClient = require(script.Parent:WaitForChild("EffectsClient"))
 local AnimationClient = require(script.Parent:WaitForChild("AnimationClient"))
 local SettingsClient = require(script.Parent:WaitForChild("SettingsClient"))
 
--- Initialize in correct dependency order:
-ClientCore.Init()
-SettingsClient.Init()
-UIClient.Init()
-CameraClient.Init()
-InputClient.Init()
-CombatClient.Init()
-EffectsClient.Init()
+-- Initialize in correct dependency order (each wrapped so one failure doesn't kill the rest):
+local function safeInit(name, fn)
+	local ok, err = pcall(fn)
+	if not ok then warn("[PDA] Init "..name.." failed: "..tostring(err)) end
+end
+
+safeInit("ClientCore", function() ClientCore.Init() end)
+safeInit("SettingsClient", function() SettingsClient.Init() end)
+safeInit("UIClient", function() UIClient.Init() end)
+safeInit("CameraClient", function() CameraClient.Init() end)
+safeInit("InputClient", function() InputClient.Init() end)
+safeInit("CombatClient", function() CombatClient.Init() end)
+safeInit("EffectsClient", function() EffectsClient.Init() end)
 
 -- Animation client setup for local player rendering
 -- (handled per-frame in InputClient or via RenderStepped)

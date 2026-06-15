@@ -1373,7 +1373,8 @@ Debris:AddItem(shard, 0.6)
 		end
 
 	end
-end
+
+end)
 
 	damageNumberEvent.OnClientEvent:Connect(function(payload)
 		local camera = workspace.CurrentCamera

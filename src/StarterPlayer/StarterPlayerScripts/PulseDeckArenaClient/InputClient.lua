@@ -28,9 +28,10 @@ local function sendFire()
 end
 
 local function isChatFocused()
-	-- Check if any UI element has keyboard focus
-	local guiService = game:GetService("GuiService")
-	return guiService:IsFocused()
+	local ok, focused = pcall(function()
+		return game:GetService("GuiService"):IsFocused()
+	end)
+	return ok and focused or false
 end
 
 function InputClient.Init()
