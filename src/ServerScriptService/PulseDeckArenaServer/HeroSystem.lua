@@ -123,7 +123,7 @@ local function createRig(heroId, teamId, ownerId, guid, skinId)
 	-- Clothing overlays from skin
 	if skinDef then
 		-- Shirt / chest plate overlay
-		if equippedSkin.shirtColor then
+		if skinDef.shirtColor then
 			local shirtOverlay = Instance.new("Part")
 			shirtOverlay.Name = "ClothingShirt"
 			shirtOverlay.Size = Vector3.new(2.2, 2.4, 1.3)
@@ -137,7 +137,7 @@ local function createRig(heroId, teamId, ownerId, guid, skinId)
 		end
 
 		-- Pants overlay
-		if equippedSkin.pantsColor then
+		if skinDef.pantsColor then
 			local pantsOverlay = Instance.new("Part")
 			pantsOverlay.Name = "ClothingPants"
 			pantsOverlay.Size = Vector3.new(2.1, 2.2, 1.2)

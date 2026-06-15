@@ -187,7 +187,13 @@ function MatchSystem.BeginMatch()
 		end
 	end)
 
-	MapBuilder.SetupGameMode(MatchSystem.GameMode)
+	-- Setup game mode objects on map (lazy require to avoid circular dependency)
+	local ok, MapBuilder = pcall(function()
+		return require(script.Parent:WaitForChild("MapBuilder"))
+	end)
+	if ok and MapBuilder and MapBuilder.SetupGameMode then
+		MapBuilder.SetupGameMode(MatchSystem.GameMode)
+	end
 end
 
 -- === BOMB DEFUSE MODE ===

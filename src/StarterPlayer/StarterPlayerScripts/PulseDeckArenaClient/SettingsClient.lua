@@ -219,11 +219,19 @@ function SettingsClient.Init()
 end
 
 function SettingsClient.Save()
+	-- Client cannot use DataStoreService — save to a StringValue under LocalPlayer
 	local ok, err = pcall(function()
-		local dss = game:GetService("DataStoreService")
-		local store = dss:GetDataStore("PulseDeckArenaSettings")
-		store:SetAsync("settings_" .. tostring(game.Players.LocalPlayer.UserId), {
-			bindings = SettingsClient.Bindings,
+		local player = game.Players.LocalPlayer
+		if not player then return end
+		local http = game:GetService("HttpService")
+		local key = "PDA_Settings"
+		local existing = player:FindFirstChild(key)
+		if not existing then
+			existing = Instance.new("StringValue")
+			existing.Name = key
+			existing.Parent = player
+		end
+		existing.Value = http:JSONEncode({
 			graphicsPreset = SettingsClient.GraphicsPreset,
 			fpsCap = SettingsClient.FPSCap,
 			masterVolume = SettingsClient.MasterVolume,
@@ -237,40 +245,22 @@ function SettingsClient.Save()
 		})
 	end)
 	if not ok then
-		-- Fallback: save to HttpService
-		local ok2, err2 = pcall(function()
-			local http = game:GetService("HttpService")
-			local path = "PDA_Settings_" .. tostring(game.Players.LocalPlayer.UserId)
-			local f = Instance.new("StringValue")
-			f.Name = path
-			f.Value = http:JSONEncode({
-				bindings = SettingsClient.Bindings,
-				graphicsPreset = SettingsClient.GraphicsPreset,
-				fpsCap = SettingsClient.FPSCap,
-				masterVolume = SettingsClient.MasterVolume,
-				sfxVolume = SettingsClient.SFXVolume,
-				musicVolume = SettingsClient.MusicVolume,
-				sensitivity = SettingsClient.Sensitivity,
-				invertY = SettingsClient.InvertY,
-				cameraShake = SettingsClient.CameraShake,
-			})
-			f.Parent = game.Players.LocalPlayer
-		end)
+		warn("[SettingsClient] Save failed:", err)
 	end
 end
 
 function SettingsClient.Load()
 	local ok, data = pcall(function()
-		local dss = game:GetService("DataStoreService")
-		local store = dss:GetDataStore("PulseDeckArenaSettings")
-		return store:GetAsync("settings_" .. tostring(game.Players.LocalPlayer.UserId))
+		local player = game.Players.LocalPlayer
+		if not player then return nil end
+		local http = game:GetService("HttpService")
+		local sv = player:FindFirstChild("PDA_Settings")
+		if sv and sv.Value ~= "" then
+			return http:JSONDecode(sv.Value)
+		end
+		return nil
 	end)
 	if ok and type(data) == "table" then
-		if data.bindings then
-			for k, v in pairs(data.bindings) do
-				SettingsClient.Bindings[k] = v
-			end
-		end
 		if data.graphicsPreset then
 			SettingsClient.ApplyGraphicsPreset(data.graphicsPreset)
 		end
@@ -282,9 +272,9 @@ function SettingsClient.Load()
 		SettingsClient.MusicVolume = data.musicVolume or 0.5
 		SettingsClient.Sensitivity = data.sensitivity or 1
 		SettingsClient.InvertY = data.invertY or false
-		SettingsClient.CameraShake = data.cameraShake or true
-		SettingsClient.ShowDamageNumbers = data.showDamageNumbers or true
-		SettingsClient.ShowKillfeed = data.showKillfeed or true
+		SettingsClient.CameraShake = data.cameraShake ~= false
+		SettingsClient.ShowDamageNumbers = data.showDamageNumbers ~= false
+		SettingsClient.ShowKillfeed = data.showKillfeed ~= false
 	end
 end
 

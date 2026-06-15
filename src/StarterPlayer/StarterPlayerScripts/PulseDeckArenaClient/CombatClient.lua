@@ -660,7 +660,10 @@ function CombatClient.Init()
 	Util = require(sharedRoot:WaitForChild("Util"))
 	ProgressionUtils = require(sharedRoot:WaitForChild("ProgressionUtils"))
 
-	effectsEvent.OnClientEvent:Connect(function(payload)
+	if not effectsEvent then
+		warn("[CombatClient] EffectsEvent remote not found — visual effects disabled")
+	else
+		effectsEvent.OnClientEvent:Connect(function(payload)
 		if payload.effectType == "Tracer" or payload.effectType == "Beam" then
 			CombatClient.RenderTracer(payload.startPosition, payload.endPosition, payload.color, payload.thickness, payload.isHeadshot)
 		elseif payload.effectType == "Explosion" then
@@ -735,31 +738,38 @@ function CombatClient.Init()
 		elseif payload.effectType == "Trail" then
 			CombatClient.RenderTrail(payload.startPosition, payload.endPosition, payload.color, payload.duration)
 		end
-	end)
+	end) -- effectsEvent
+	end -- if effectsEvent
 
-	damageNumberEvent.OnClientEvent:Connect(function(payload)
-		local camera = workspace.CurrentCamera
-		if not camera then return end
-		local screenPos, onScreen = camera:WorldToScreenPoint(payload.position)
-		if not onScreen then return end
+	if damageNumberEvent then
+		damageNumberEvent.OnClientEvent:Connect(function(payload)
+			local camera = workspace.CurrentCamera
+			if not camera then return end
+			local screenPos, onScreen = camera:WorldToScreenPoint(payload.position)
+			if not onScreen then return end
 
-		local color = payload.color or Color3.fromRGB(255, 255, 255)
-		spawnDamageNumber(payload.position, payload.amount, color, payload.isHeadshot)
-	end)
+			local color = payload.color or Color3.fromRGB(255, 255, 255)
+			spawnDamageNumber(payload.position, payload.amount, color, payload.isHeadshot)
+		end)
+	end
 
-	killfeedEvent.OnClientEvent:Connect(function(payload)
-		-- Dispatch killfeed through ClientCore event system
-		local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
-		if ClientCore and ClientCore.Events and ClientCore.Events.Killfeed then
-			ClientCore.Events.Killfeed:Fire(payload)
-		end
-	end)
+	if killfeedEvent then
+		killfeedEvent.OnClientEvent:Connect(function(payload)
+			-- Dispatch killfeed through ClientCore event system
+			local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
+			if ClientCore and ClientCore.Events and ClientCore.Events.Killfeed then
+				ClientCore.Events.Killfeed:Fire(payload)
+			end
+		end)
+	end
 
-	announcementEvent.OnClientEvent:Connect(function(payload)
-		if UIClient and UIClient.ShowAnnouncement then
-			UIClient:ShowAnnouncement(payload)
-		end
-	end)
+	if announcementEvent then
+		announcementEvent.OnClientEvent:Connect(function(payload)
+			if UIClient and UIClient.ShowAnnouncement then
+				UIClient:ShowAnnouncement(payload)
+			end
+		end)
+	end
 end
 
 return CombatClient

@@ -1783,6 +1783,283 @@ function UIClient.ShowAnnouncement(payload)
 end
 
 -----------------------------------------------------
+-- SHOP UI (B key)
+-----------------------------------------------------
+
+function UIClient.BuildShopUI()
+	if not UIClient.HUD then return end
+	UIClient.ShopFrame = createRoundedFrame(UIClient.HUD, "ShopFrame",
+		UDim2.new(0, 480, 0, 560), UDim2.new(0.5, -240, 0.5, -280),
+		Color3.fromRGB(8, 10, 18), 0.15, 14)
+	UIClient.ShopFrame.Visible = false
+	UIClient.ShopFrame.ZIndex = 50
+
+	createTextLabel(UIClient.ShopFrame, "⚡ SHOP",
+		UDim2.new(1, 0, 0, 50), UDim2.new(0, 0, 0, 8),
+		28, Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	local closeBtn = createTextButton(UIClient.ShopFrame, "✕ CLOSE",
+		UDim2.new(0, 100, 0, 36), UDim2.new(1, -110, 0, 8),
+		Color3.fromRGB(180, 50, 50), Color3.fromRGB(220, 70, 70))
+	closeBtn.TextSize = 14
+	closeBtn.MouseButton1Click:Connect(function()
+		UIClient.ShopFrame.Visible = false
+	end)
+
+	local scroll = Instance.new("ScrollingFrame")
+	scroll.Size = UDim2.new(1, -16, 1, -60)
+	scroll.Position = UDim2.new(0, 8, 0, 56)
+	scroll.BackgroundTransparency = 1
+	scroll.ScrollBarThickness = 4
+	scroll.CanvasSize = UDim2.new(0, 0, 0, 0)
+	scroll.Parent = UIClient.ShopFrame
+
+	local layout = Instance.new("UIListLayout")
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Padding = UDim.new(0, 6)
+	layout.Parent = scroll
+
+	local totalHeight = 0
+	for i, item in ipairs(Config.SHOP_ITEMS) do
+		local row = createRoundedFrame(scroll, item.id,
+			UDim2.new(1, -8, 0, 64), UDim2.new(0, 4, 0, 0),
+			Color3.fromRGB(18, 20, 32), 0, 8)
+		row.LayoutOrder = i
+
+		createTextLabel(row, item.name,
+			UDim2.new(0.6, 0, 0.5, 0), UDim2.new(0, 10, 0, 6),
+			14, Color3.fromRGB(240, 240, 255), Enum.Font.GothamSemibold)
+
+		createTextLabel(row, "💎 " .. tostring(item.price),
+			UDim2.new(0.25, 0, 0.5, 0), UDim2.new(0.6, 0, 0, 6),
+			13, Color3.fromRGB(255, 215, 50), Enum.Font.GothamBold)
+
+		createTextLabel(row, item.category,
+			UDim2.new(0.5, 0, 0.4, 0), UDim2.new(0, 10, 0.55, 0),
+			11, Color3.fromRGB(120, 130, 150), Enum.Font.Gotham)
+
+		local buyBtn = createTextButton(row, "BUY",
+			UDim2.new(0, 70, 0, 36), UDim2.new(1, -80, 0.5, -18),
+			Color3.fromRGB(40, 160, 80), Color3.fromRGB(60, 200, 100))
+		buyBtn.TextSize = 13
+		buyBtn.MouseButton1Click:Connect(function()
+			ClientCore.Fire("RequestShopBuy", { itemId = item.id })
+		end)
+
+		totalHeight = totalHeight + 70
+	end
+	scroll.CanvasSize = UDim2.new(0, 0, 0, totalHeight)
+end
+
+-----------------------------------------------------
+-- EMOTE UI (T key)
+-----------------------------------------------------
+
+function UIClient.BuildEmoteUI()
+	if not UIClient.HUD then return end
+	UIClient.EmoteFrame = createRoundedFrame(UIClient.HUD, "EmoteFrame",
+		UDim2.new(0, 300, 0, 180), UDim2.new(0.5, -150, 0.85, -90),
+		Color3.fromRGB(10, 12, 20), 0.2, 12)
+	UIClient.EmoteFrame.Visible = false
+	UIClient.EmoteFrame.ZIndex = 40
+
+	createTextLabel(UIClient.EmoteFrame, "EMOTES",
+		UDim2.new(1, 0, 0, 32), UDim2.new(0, 0, 0, 4),
+		16, Color3.fromRGB(200, 210, 230), Enum.Font.GothamBold)
+
+	local emotes = {"👋 Wave", "🤣 Laugh", "💀 Taunt", "🙏 GG", "🔥 Hype"}
+	for i, e in ipairs(emotes) do
+		local x = (i - 1) % 3
+		local y = math.floor((i - 1) / 3)
+		local btn = createTextButton(UIClient.EmoteFrame, e,
+			UDim2.new(0, 88, 0, 36), UDim2.new(0, 8 + x * 96, 0, 36 + y * 44),
+			Color3.fromRGB(30, 35, 55), Color3.fromRGB(50, 55, 80))
+		btn.TextSize = 11
+		btn.MouseButton1Click:Connect(function()
+			UIClient.EmoteFrame.Visible = false
+		end)
+	end
+end
+
+-----------------------------------------------------
+-- PRACTICE RANGE UI (M key)
+-----------------------------------------------------
+
+function UIClient.BuildPracticeRangeUI()
+	if not UIClient.HUD then return end
+	UIClient.PracticeFrame = createRoundedFrame(UIClient.HUD, "PracticeFrame",
+		UDim2.new(0, 320, 0, 200), UDim2.new(0.5, -160, 0.5, -100),
+		Color3.fromRGB(10, 12, 20), 0.2, 12)
+	UIClient.PracticeFrame.Visible = false
+	UIClient.PracticeFrame.ZIndex = 40
+
+	createTextLabel(UIClient.PracticeFrame, "🎯 PRACTICE RANGE",
+		UDim2.new(1, 0, 0, 40), UDim2.new(0, 0, 0, 6),
+		18, Color3.fromRGB(200, 220, 255), Enum.Font.GothamBold)
+
+	local startBtn = createTextButton(UIClient.PracticeFrame, "▶ START PRACTICE",
+		UDim2.new(0.7, 0, 0, 44), UDim2.new(0.15, 0, 0, 55),
+		Color3.fromRGB(40, 140, 60), Color3.fromRGB(60, 180, 80))
+	startBtn.TextSize = 14
+	startBtn.MouseButton1Click:Connect(function()
+		ClientCore.Fire("RequestPractice", {})
+		UIClient.PracticeFrame.Visible = false
+	end)
+
+	local closeBtn = createTextButton(UIClient.PracticeFrame, "✕",
+		UDim2.new(0, 36, 0, 32), UDim2.new(1, -44, 0, 6),
+		Color3.fromRGB(160, 40, 40), Color3.fromRGB(200, 60, 60))
+	closeBtn.TextSize = 16
+	closeBtn.MouseButton1Click:Connect(function()
+		UIClient.PracticeFrame.Visible = false
+	end)
+end
+
+-----------------------------------------------------
+-- PAUSE MENU (P key)
+-----------------------------------------------------
+
+function UIClient:ShowPauseMenu()
+	if UIClient.PauseMenu and UIClient.PauseMenu.Parent then
+		UIClient.PauseMenu.Visible = not UIClient.PauseMenu.Visible
+		return
+	end
+
+	local gui = UIClient.Gui
+	if not gui then return end
+
+	local frame = createRoundedFrame(gui, "PauseMenu",
+		UDim2.new(0, 380, 0, 380), UDim2.new(0.5, -190, 0.5, -190),
+		Color3.fromRGB(8, 10, 18), 0.1, 14)
+	frame.ZIndex = 100
+	UIClient.PauseMenu = frame
+
+	local stroke = Instance.new("UIStroke")
+	stroke.Color = Color3.fromRGB(60, 70, 100)
+	stroke.Thickness = 2
+	stroke.Parent = frame
+
+	createTextLabel(frame, "⏸ PAUSED",
+		UDim2.new(1, 0, 0, 60), UDim2.new(0, 0, 0, 10),
+		32, Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	local resumeBtn = createTextButton(frame, "▶ RESUME",
+		UDim2.new(0.7, 0, 0, 48), UDim2.new(0.15, 0, 0, 80),
+		Color3.fromRGB(40, 160, 80), Color3.fromRGB(60, 200, 100))
+	resumeBtn.TextSize = 18
+	resumeBtn.Font = Enum.Font.GothamBold
+	resumeBtn.MouseButton1Click:Connect(function()
+		frame.Visible = false
+	end)
+
+	local settingsBtn = createTextButton(frame, "⚙ SETTINGS",
+		UDim2.new(0.7, 0, 0, 44), UDim2.new(0.15, 0, 0, 140),
+		Color3.fromRGB(50, 60, 90), Color3.fromRGB(70, 85, 125))
+	settingsBtn.TextSize = 15
+	settingsBtn.MouseButton1Click:Connect(function()
+		frame.Visible = false
+		UIClient.ShowSettings()
+	end)
+
+	local leaveBtn = createTextButton(frame, "🚪 LEAVE MATCH",
+		UDim2.new(0.7, 0, 0, 44), UDim2.new(0.15, 0, 0, 200),
+		Color3.fromRGB(160, 40, 40), Color3.fromRGB(200, 60, 60))
+	leaveBtn.TextSize = 15
+	leaveBtn.MouseButton1Click:Connect(function()
+		ClientCore.Fire("RequestLeave", {})
+		frame:Destroy()
+		UIClient.PauseMenu = nil
+	end)
+
+	createTextLabel(frame, "Press P to close",
+		UDim2.new(1, 0, 0, 24), UDim2.new(0, 0, 1, -30),
+		12, Color3.fromRGB(100, 110, 130), Enum.Font.Gotham)
+end
+
+-----------------------------------------------------
+-- SETTINGS (called from main menu and pause)
+-----------------------------------------------------
+
+function UIClient.ShowSettings()
+	local gui = UIClient.Gui
+	if not gui then return end
+
+	local old = gui:FindFirstChild("SettingsPanel")
+	if old then old:Destroy() end
+
+	local frame = createRoundedFrame(gui, "SettingsPanel",
+		UDim2.new(0, 440, 0, 480), UDim2.new(0.5, -220, 0.5, -240),
+		Color3.fromRGB(8, 10, 18), 0.1, 14)
+	frame.ZIndex = 90
+
+	createTextLabel(frame, "⚙ SETTINGS",
+		UDim2.new(1, 0, 0, 50), UDim2.new(0, 0, 0, 8),
+		26, Color3.fromRGB(255, 222, 35), Enum.Font.GothamBlack)
+
+	local function sliderRow(parent, label, yPos, initVal, onChange)
+		createTextLabel(parent, label,
+			UDim2.new(0.45, 0, 0, 28), UDim2.new(0, 12, 0, yPos),
+			13, Color3.fromRGB(200, 210, 220), Enum.Font.GothamSemibold)
+		local bar = createRoundedFrame(parent, label .. "Bar",
+			UDim2.new(0, 200, 0, 12), UDim2.new(0.5, 0, 0, yPos + 8),
+			Color3.fromRGB(30, 35, 55), 0, 6)
+		local fill = createRoundedFrame(bar, "Fill",
+			UDim2.new(initVal, 0, 1, 0), UDim2.new(0, 0, 0, 0),
+			Color3.fromRGB(80, 160, 255), 0, 6)
+		local btn = Instance.new("TextButton")
+		btn.Size = UDim2.fromScale(1, 1)
+		btn.BackgroundTransparency = 1
+		btn.Text = ""
+		btn.Parent = bar
+		btn.MouseButton1Click:Connect(function()
+			local mouse = game:GetService("Players").LocalPlayer:GetMouse()
+			local relX = math.clamp((mouse.X - bar.AbsolutePosition.X) / bar.AbsoluteSize.X, 0, 1)
+			fill.Size = UDim2.new(relX, 0, 1, 0)
+			if onChange then onChange(relX) end
+		end)
+	end
+
+	local SettingsClient = require(script.Parent:WaitForChild("SettingsClient"))
+	sliderRow(frame, "Master Volume", 60, SettingsClient.MasterVolume, function(v)
+		SettingsClient.MasterVolume = v
+	end)
+	sliderRow(frame, "SFX Volume", 100, SettingsClient.SFXVolume, function(v)
+		SettingsClient.SFXVolume = v
+	end)
+	sliderRow(frame, "Music Volume", 140, SettingsClient.MusicVolume, function(v)
+		SettingsClient.MusicVolume = v
+	end)
+	sliderRow(frame, "Mouse Sensitivity", 180, SettingsClient.Sensitivity / 3, function(v)
+		SettingsClient.Sensitivity = v * 3
+	end)
+
+	local graphicsPresets = {"Low", "Medium", "High", "Ultra"}
+	createTextLabel(frame, "Graphics Preset",
+		UDim2.new(0.45, 0, 0, 28), UDim2.new(0, 12, 0, 230),
+		13, Color3.fromRGB(200, 210, 220), Enum.Font.GothamSemibold)
+	for i, preset in ipairs(graphicsPresets) do
+		local isActive = SettingsClient.GraphicsPreset == preset
+		local pb = createTextButton(frame, preset,
+			UDim2.new(0, 88, 0, 30), UDim2.new(0, 12 + (i-1) * 96, 0, 260),
+			isActive and Color3.fromRGB(40, 120, 200) or Color3.fromRGB(30, 35, 55),
+			Color3.fromRGB(60, 150, 230))
+		pb.TextSize = 12
+		pb.MouseButton1Click:Connect(function()
+			SettingsClient.ApplyGraphicsPreset(preset)
+		end)
+	end
+
+	local saveBtn = createTextButton(frame, "💾 SAVE & CLOSE",
+		UDim2.new(0.65, 0, 0, 44), UDim2.new(0.175, 0, 1, -56),
+		Color3.fromRGB(40, 140, 60), Color3.fromRGB(60, 180, 80))
+	saveBtn.TextSize = 14
+	saveBtn.MouseButton1Click:Connect(function()
+		SettingsClient.Save()
+		frame:Destroy()
+	end)
+end
+
+-----------------------------------------------------
 -- INIT
 -----------------------------------------------------
 

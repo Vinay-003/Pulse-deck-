@@ -54,6 +54,24 @@ local function safeDirection(hero, payload)
 	return dir.Unit
 end
 
+local function makeSphere(name, position, radius, color, lifetime)
+	local sphere = Instance.new("Part")
+	sphere.Name = name
+	sphere.Shape = Enum.PartType.Ball
+	sphere.Size = Vector3.new(radius * 2, radius * 2, radius * 2)
+	sphere.Position = position
+	sphere.Color = color or Color3.fromRGB(80, 180, 255)
+	sphere.Material = Enum.Material.Neon
+	sphere.Transparency = 0.5
+	sphere.Anchored = true
+	sphere.CanCollide = false
+	sphere.Parent = getEffectsFolder()
+	if lifetime then
+		game:GetService("Debris"):AddItem(sphere, lifetime)
+	end
+	return sphere
+end
+
 function AbilitySystem.Init(heroSystem, matchSystem, combatSystem)
 	AbilitySystem.HeroSystem = heroSystem
 	AbilitySystem.MatchSystem = matchSystem
@@ -70,10 +88,12 @@ end
 function AbilitySystem.Clear()
 	AbilitySystem.ActiveDomes = {}
 	AbilitySystem.SlowFields = {}
+	AbilitySystem.ActiveSlowFields = {}
 	AbilitySystem.Sentries = {}
 	AbilitySystem.GravityWells = {}
 	AbilitySystem.EnergyShields = {}
 	AbilitySystem.ActiveHealingFields = {}
+	AbilitySystem.ActiveMines = {}
 	local effects = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Effects")
 	if effects then
 		effects:ClearAllChildren()
@@ -709,21 +729,6 @@ function AbilitySystem.UpdateTimedAbilities()
 				end
 			end
 		end
-	end
-end
-
-function AbilitySystem.Clear()
-	AbilitySystem.ActiveDomes = {}
-	AbilitySystem.SlowFields = {}
-	AbilitySystem.ActiveSlowFields = {}
-	AbilitySystem.Sentries = {}
-	AbilitySystem.GravityWells = {}
-	AbilitySystem.EnergyShields = {}
-	AbilitySystem.ActiveHealingFields = {}
-	AbilitySystem.ActiveMines = {}
-	local effects = workspace:FindFirstChild("PulseDeckArenaWorld") and workspace.PulseDeckArenaWorld:FindFirstChild("Effects")
-	if effects then
-		effects:ClearAllChildren()
 	end
 end
 

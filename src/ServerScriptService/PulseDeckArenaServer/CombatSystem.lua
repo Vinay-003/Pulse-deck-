@@ -400,6 +400,17 @@ function CombatSystem.ApplyDamage(attacker, target, amount, damageType, isHeadsh
 
 		if attacker.OwnerPlayer and not (MatchSystem.GameMode == "FFA") then
 			MatchSystem.AddKillstreak(attacker.OwnerPlayer.UserId)
+
+			-- Killstreak tier rewards: spawn pickups at attacker position
+			local streak = MatchSystem.Killstreaks[attacker.OwnerPlayer.UserId] or 0
+			for _, tier in ipairs(Config.KILLSTREAK_TIERS) do
+				if streak == tier.kills then
+					-- Spawn the reward pickup
+					CombatSystem.CreatePickup(tier.reward, attacker.Root.Position + Vector3.new(0, 2, 0))
+					fireAnnouncement(string.format(tier.message, attacker.OwnerPlayer.Name), tier.duration)
+					break
+				end
+			end
 		end
 
 		local HeroSystem = require(script.Parent:WaitForChild("HeroSystem"))

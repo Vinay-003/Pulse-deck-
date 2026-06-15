@@ -4,93 +4,93 @@
 local SoundManager = {}
 
 SoundManager.Sounds = {
-	-- Weapon fire (replace rbxassetid://0 with uploaded IDs)
-	PulseRifle = "rbxassetid://0",
-	Shotgun = "rbxassetid://0",
-	Sniper = "rbxassetid://0",
-	SMG = "rbxassetid://0",
-	Flamethrower = "rbxassetid://0",
-	RocketLauncher = "rbxassetid://0",
-	PlasmaCaster = "rbxassetid://0",
-	CryoRifle = "rbxassetid://0",
-	LightningGun = "rbxassetid://0",
-	RailLance = "rbxassetid://0",
-	EnergySword = "rbxassetid://0",
-	GravityHammer = "rbxassetid://0",
-	VortexRifle = "rbxassetid://0",
-	ClusterMortar = "rbxassetid://0",
-	ThermalGrenade = "rbxassetid://0",
-	ArcLauncher = "rbxassetid://0",
-	RivetCarbine = "rbxassetid://0",
-	IonBeam = "rbxassetid://0",
-	PhaseSMG = "rbxassetid://0",
-	NanoSMG = "rbxassetid://0",
-	BioRifle = "rbxassetid://0",
+	-- Weapon fire (free Roblox library)
+	PulseRifle      = "rbxassetid://4612625985",
+	Shotgun         = "rbxassetid://5801257793",
+	Sniper          = "rbxassetid://2697423085",
+	SMG             = "rbxassetid://4612625985",
+	Flamethrower    = "rbxassetid://3035356355",
+	RocketLauncher  = "rbxassetid://3935339891",
+	PlasmaCaster    = "rbxassetid://4612625985",
+	CryoRifle       = "rbxassetid://2697423085",
+	LightningGun    = "rbxassetid://5801257793",
+	RailLance       = "rbxassetid://2697423085",
+	EnergySword     = "rbxassetid://3035356355",
+	GravityHammer   = "rbxassetid://3935339891",
+	VortexRifle     = "rbxassetid://4612625985",
+	ClusterMortar   = "rbxassetid://3935339891",
+	ThermalGrenade  = "rbxassetid://3935339891",
+	ArcLauncher     = "rbxassetid://4612625985",
+	RivetCarbine    = "rbxassetid://4612625985",
+	IonBeam         = "rbxassetid://5801257793",
+	PhaseSMG        = "rbxassetid://4612625985",
+	NanoSMG         = "rbxassetid://4612625985",
+	BioRifle        = "rbxassetid://3035356355",
 
 	-- Abilities
-	PhaseDash = "rbxassetid://0",
-	ShieldDome = "rbxassetid://0",
-	HealPulse = "rbxassetid://0",
-	TrackerMark = "rbxassetid://0",
-	ClusterCharge = "rbxassetid://0",
-	SlowField = "rbxassetid://0",
-	GravityWell = "rbxassetid://0",
-	Blizzard = "rbxassetid://0",
-	FireNova = "rbxassetid://0",
-	Supernova = "rbxassetid://0",
-	Berserk = "rbxassetid://0",
-	CloakAndDagger = "rbxassetid://0",
-	PhoenixDive = "rbxassetid://0",
-	EMPBlast = "rbxassetid://0",
-	SmokeScreen = "rbxassetid://0",
-	SmartMine = "rbxassetid://0",
-	Adrenaline = "rbxassetid://0",
-	TimeDilation = "rbxassetid://0",
-	Fortify = "rbxassetid://0",
-	Overcharge = "rbxassetid://0",
+	PhaseDash       = "rbxassetid://3035356355",
+	ShieldDome      = "rbxassetid://4612625985",
+	HealPulse       = "rbxassetid://5801257793",
+	TrackerMark     = "rbxassetid://2697423085",
+	ClusterCharge   = "rbxassetid://3935339891",
+	SlowField       = "rbxassetid://3035356355",
+	GravityWell     = "rbxassetid://3935339891",
+	Blizzard        = "rbxassetid://3035356355",
+	FireNova        = "rbxassetid://3035356355",
+	Supernova       = "rbxassetid://3935339891",
+	Berserk         = "rbxassetid://2697423085",
+	CloakAndDagger  = "rbxassetid://3035356355",
+	PhoenixDive     = "rbxassetid://3935339891",
+	EMPBlast        = "rbxassetid://5801257793",
+	SmokeScreen     = "rbxassetid://3035356355",
+	SmartMine       = "rbxassetid://5801257793",
+	Adrenaline      = "rbxassetid://2697423085",
+	TimeDilation    = "rbxassetid://5801257793",
+	Fortify         = "rbxassetid://4612625985",
+	Overcharge      = "rbxassetid://2697423085",
 
 	-- Impacts / hits
-	ImpactFlesh = "rbxassetid://0",
-	ImpactShield = "rbxassetid://0",
-	ImpactArmor = "rbxassetid://0",
-	ExplosionSmall = "rbxassetid://0",
-	ExplosionLarge = "rbxassetid://0",
-	Headshot = "rbxassetid://0",
-	MeleeSwing = "rbxassetid://0",
-	MeleeHit = "rbxassetid://0",
+	ImpactFlesh     = "rbxassetid://5801257793",
+	ImpactShield    = "rbxassetid://4612625985",
+	ImpactArmor     = "rbxassetid://4612625985",
+	ExplosionSmall  = "rbxassetid://3935339891",
+	ExplosionLarge  = "rbxassetid://3935339891",
+	Headshot        = "rbxassetid://2697423085",
+	MeleeSwing      = "rbxassetid://3035356355",
+	MeleeHit        = "rbxassetid://5801257793",
 
 	-- Pickups & environment
-	PickupHealth = "rbxassetid://0",
-	PickupAmmo = "rbxassetid://0",
-	PickupEnergy = "rbxassetid://0",
-	PickupArmor = "rbxassetid://0",
-	PowerUpActivate = "rbxassetid://0",
-	JumpPad = "rbxassetid://0",
-	FlagCapture = "rbxassetid://0",
-	KOTHBeacon = "rbxassetid://0",
-	WindAmbience = "rbxassetid://0",
-	NeonHum = "rbxassetid://0",
-	BombPlant = "rbxassetid://0",
-	BombBeep = "rbxassetid://0",
-	BombDefuse = "rbxassetid://0",
-	BombExplosion = "rbxassetid://0",
-	RoundStart = "rbxassetid://0",
-	RoundEnd = "rbxassetid://0",
-	BuyPhaseStart = "rbxassetid://0",
+	PickupHealth    = "rbxassetid://4612625985",
+	PickupAmmo      = "rbxassetid://5801257793",
+	PickupEnergy    = "rbxassetid://4612625985",
+	PickupArmor     = "rbxassetid://4612625985",
+	PowerUpActivate = "rbxassetid://2697423085",
+	JumpPad         = "rbxassetid://3035356355",
+	FlagCapture     = "rbxassetid://2697423085",
+	KOTHBeacon      = "rbxassetid://4612625985",
+	WindAmbience    = "rbxassetid://3035356355",
+	NeonHum         = "rbxassetid://4612625985",
+	BombPlant       = "rbxassetid://5801257793",
+	BombBeep        = "rbxassetid://5801257793",
+	BombDefuse      = "rbxassetid://4612625985",
+	BombExplosion   = "rbxassetid://3935339891",
+	RoundStart      = "rbxassetid://2697423085",
+	RoundEnd        = "rbxassetid://2697423085",
+	BuyPhaseStart   = "rbxassetid://4612625985",
 
 	-- UI
-	MenuSelect = "rbxassetid://0",
-	MenuConfirm = "rbxassetid://0",
-	MenuCancel = "rbxassetid://0",
-	MenuHover = "rbxassetid://0",
-	KillSound = "rbxassetid://0",
-	KillStreak = "rbxassetid://0",
-	KillStreakEnd = "rbxassetid://0",
-	MatchStart = "rbxassetid://0",
-	MatchEnd = "rbxassetid://0",
-	AbilityReady = "rbxassetid://0",
-	UltimateReady = "rbxassetid://0",
-	Pickup = "rbxassetid://0",
+	MenuSelect      = "rbxassetid://4612625985",
+	MenuConfirm     = "rbxassetid://4612625985",
+	MenuCancel      = "rbxassetid://5801257793",
+	MenuHover       = "rbxassetid://5801257793",
+	KillSound       = "rbxassetid://2697423085",
+	KillStreak      = "rbxassetid://2697423085",
+	KillStreakEnd   = "rbxassetid://5801257793",
+	MatchStart      = "rbxassetid://2697423085",
+	MatchEnd        = "rbxassetid://2697423085",
+	AbilityReady    = "rbxassetid://4612625985",
+	UltimateReady   = "rbxassetid://2697423085",
+	Pickup          = "rbxassetid://4612625985",
 }
 
 function SoundManager.PlaySFX(soundName, position, volume)
@@ -121,6 +121,25 @@ function SoundManager.PlayUISound(soundName)
 		uiOnly = true,
 		volume = 0.7,
 	})
+end
+
+function SoundManager.PlayBGM(soundId, volume)
+	local sound = workspace:FindFirstChild("PDA_BGM")
+	if sound then sound:Destroy() end
+
+	local bgm = Instance.new("Sound")
+	bgm.Name = "PDA_BGM"
+	bgm.SoundId = soundId or "rbxassetid://1843444168" -- Free ambient music
+	bgm.Volume = volume or 0.3
+	bgm.Looped = true
+	bgm.Parent = workspace
+	bgm:Play()
+	return bgm
+end
+
+function SoundManager.StopBGM()
+	local bgm = workspace:FindFirstChild("PDA_BGM")
+	if bgm then bgm:Destroy() end
 end
 
 return SoundManager

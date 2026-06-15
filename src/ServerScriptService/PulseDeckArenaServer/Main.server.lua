@@ -3,10 +3,13 @@ local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
 local Debris = game:GetService("Debris")
 local MarketplaceService = game:GetService("MarketplaceService")
+local Teams = game:GetService("Teams")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
 local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
+local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
+local Util = require(sharedRoot:WaitForChild("Util"))
 
 local MapBuilder = require(script.Parent:WaitForChild("MapBuilder"))
 local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
@@ -35,6 +38,33 @@ end
 ensureWorld()
 
 MapBuilder.BuildNeonFoundry()
+
+-- Initialize core systems at startup
+AbilitySystem.Init(HeroSystem, MatchSystem, CombatSystem)
+if not AISystem.Initialized then
+	AISystem.Init(HeroSystem, MatchSystem, CombatSystem, AbilitySystem)
+	AISystem.Initialized = true
+end
+
+-- Create Roblox Teams for Red and Blue
+do
+	local redTeam = Teams:FindFirstChild("Red")
+	if not redTeam then
+		redTeam = Instance.new("Team")
+		redTeam.Name = "Red"
+		redTeam.TeamColor = BrickColor.new("Bright red")
+		redTeam.AutoAssignable = false
+		redTeam.Parent = Teams
+	end
+	local blueTeam = Teams:FindFirstChild("Blue")
+	if not blueTeam then
+		blueTeam = Instance.new("Team")
+		blueTeam.Name = "Blue"
+		blueTeam.TeamColor = BrickColor.new("Bright blue")
+		blueTeam.AutoAssignable = false
+		blueTeam.Parent = Teams
+	end
+end
 
 CombatSystem.Init()
 do
@@ -548,6 +578,12 @@ MatchSystem.OnEnded(function(winnerTeam)
 		local extraXP = 0
 		if hero then
 			extraXP = (hero.KillCount or 0) * 15 + math.floor((hero.DamageDealt or 0) / 10)
+			-- Hero mastery increment
+			local profile = ProgressionSystem.Profiles[player.UserId]
+			if profile then
+				profile.HeroMastery = profile.HeroMastery or {}
+				profile.HeroMastery[hero.HeroId] = (profile.HeroMastery[hero.HeroId] or 0) + (hero.KillCount or 0)
+			end
 		end
 
 		local profile = ProgressionSystem.Profiles[player.UserId]
@@ -873,48 +909,49 @@ task.spawn(function()
 				processCloakAndDagger(hero, os.clock())
 
 				-- EMP disabled
-processEMP(hero, os.clock())
+				processEMP(hero, os.clock())
 
-			-- Smoke screen
-			processSmokeScreen(hero, os.clock())
+				-- Smoke screen
+				processSmokeScreen(hero, os.clock())
 
-			-- Radar pulse
-			processRadarPulse(hero, os.clock())
+				-- Radar pulse
+				processRadarPulse(hero, os.clock())
 
-			-- Tactical overlay
-			processTacticalOverlay(hero, os.clock())
+				-- Tactical overlay
+				processTacticalOverlay(hero, os.clock())
 
-			-- Hero power effect processing
-			local heroDef = HeroConfig[hero.HeroId]
-			if heroDef and heroDef.powers then
-				for powerId, powerDef in pairs(heroDef.powers) do
-					local powerKey = "power_" .. powerId
-					if hero.ActiveEffects and hero.ActiveEffects[powerKey] then
-						local pe = hero.ActiveEffects[powerKey]
-						if os.clock() >= pe.ExpireAt then
-							hero.ActiveEffects[powerKey] = nil
-						elseif os.clock() - pe.LastTick >= (powerDef.tickInterval or 1) then
-							pe.LastTick = os.clock()
-							-- Apply power effect
-							if powerId == "speedBoost" then
-								hero.Humanoid.WalkSpeed = heroDef.walkSpeed * (powerDef.multiplier or 1.3)
-							elseif powerId == "damageResistance" then
-								-- Handled in ApplyDamage via ActiveEffects
-							elseif powerId == "wallHack" then
-								-- Handled client-side via ESP
-							elseif powerId == "teamHeal" then
-								-- Triggered heal pulse already
-							elseif powerId == "damageBoost" then
-								-- Apply damage multiplier on next hit
+				-- Hero power effect processing
+				local heroDef2 = HeroConfig[hero.HeroId]
+				if heroDef2 and heroDef2.powers then
+					for powerId, powerDef in pairs(heroDef2.powers) do
+						local powerKey = "power_" .. powerId
+						if hero.ActiveEffects and hero.ActiveEffects[powerKey] then
+							local pe = hero.ActiveEffects[powerKey]
+							if os.clock() >= pe.ExpireAt then
+								hero.ActiveEffects[powerKey] = nil
+							elseif os.clock() - pe.LastTick >= (powerDef.tickInterval or 1) then
+								pe.LastTick = os.clock()
+								-- Apply power effect
+								if powerId == "speedBoost" then
+									hero.Humanoid.WalkSpeed = heroDef2.walkSpeed * (powerDef.multiplier or 1.3)
+								elseif powerId == "damageResistance" then
+									-- Handled in ApplyDamage via ActiveEffects
+								elseif powerId == "wallHack" then
+									-- Handled client-side via ESP
+								elseif powerId == "teamHeal" then
+									-- Triggered heal pulse already
+								elseif powerId == "damageBoost" then
+									-- Apply damage multiplier on next hit
+								end
 							end
 						end
 					end
 				end
-			end
 
-			-- Regenerate ultimate charge slowly over time
-			if hero.UltimateCharge < hero.UltimateChargeMax then
-				hero.UltimateCharge = math.min(hero.UltimateChargeMax, hero.UltimateCharge + 0.05)
+				-- Regenerate ultimate charge slowly over time
+				if hero.UltimateCharge < hero.UltimateChargeMax then
+					hero.UltimateCharge = math.min(hero.UltimateChargeMax, hero.UltimateCharge + 0.05)
+				end
 			end
 		end
 	end
@@ -924,21 +961,26 @@ end)
 task.spawn(function()
 	while true do
 		task.wait(0.2)
-		matchStateChanged:FireAllClients({
-			state = MatchSystem.State,
-			timerRemaining = MatchSystem.Timer,
-			redScore = MatchSystem.Score.Red,
-			blueScore = MatchSystem.Score.Blue,
-			winner = MatchSystem.Winner,
-			gameMode = MatchSystem.GameMode,
-			kothHolder = MatchSystem.KOTHHolder,
-			roundNumber = MatchSystem.RoundNumber,
-			roundPhase = MatchSystem.RoundPhase,
-			bombState = MatchSystem.BombState,
-			bombTimer = MatchSystem.BombTimer,
-			roundScore = MatchSystem.RoundScore,
-			hasBomb = false,
-		})
+		-- Fire matchStateChanged per-player so hasBomb is accurate
+		for _, plr in ipairs(Players:GetPlayers()) do
+			local ctrlHero = HeroSystem.GetControlledHero(plr)
+			local plrHasBomb = ctrlHero ~= nil and ctrlHero.HasBomb == true
+			matchStateChanged:FireClient(plr, {
+				state = MatchSystem.State,
+				timerRemaining = MatchSystem.Timer,
+				redScore = MatchSystem.Score.Red,
+				blueScore = MatchSystem.Score.Blue,
+				winner = MatchSystem.Winner,
+				gameMode = MatchSystem.GameMode,
+				kothHolder = MatchSystem.KOTHHolder,
+				roundNumber = MatchSystem.RoundNumber,
+				roundPhase = MatchSystem.RoundPhase,
+				bombState = MatchSystem.BombState,
+				bombTimer = MatchSystem.BombTimer,
+				roundScore = MatchSystem.RoundScore,
+				hasBomb = plrHasBomb,
+			})
+		end
 		scoreChanged:FireAllClients({
 			Red = MatchSystem.Score.Red,
 			Blue = MatchSystem.Score.Blue,

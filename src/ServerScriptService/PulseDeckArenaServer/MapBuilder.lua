@@ -416,18 +416,23 @@ function MapBuilder.SetupGameMode(mode)
 			flagRed.Parent = effectsFolder
 			flagBlue.Parent = effectsFolder
 		end
-		-- Register as objectives
-		if not CombatSystem.Objectives["RedFlag"] then
-			CombatSystem.Objectives["RedFlag"] = {
-				TeamId = Config.TEAM_RED, Name = "RedFlag", Health = 1,
-				Model = flagRed, MaxHealth = 1,
-			}
-		end
-		if not CombatSystem.Objectives["BlueFlag"] then
-			CombatSystem.Objectives["BlueFlag"] = {
-				TeamId = Config.TEAM_BLUE, Name = "BlueFlag", Health = 1,
-				Model = flagBlue, MaxHealth = 1,
-			}
+		-- Register as objectives (lazy-require CombatSystem to avoid circular dependency)
+		local ok, CombatSys = pcall(function()
+			return require(script.Parent:WaitForChild("CombatSystem"))
+		end)
+		if ok and CombatSys and CombatSys.Objectives then
+			if not CombatSys.Objectives["RedFlag"] then
+				CombatSys.Objectives["RedFlag"] = {
+					TeamId = Config.TEAM_RED, Name = "RedFlag", Health = 1,
+					Model = flagRed, MaxHealth = 1,
+				}
+			end
+			if not CombatSys.Objectives["BlueFlag"] then
+				CombatSys.Objectives["BlueFlag"] = {
+					TeamId = Config.TEAM_BLUE, Name = "BlueFlag", Health = 1,
+					Model = flagBlue, MaxHealth = 1,
+				}
+			end
 		end
 	elseif mode == "FFA" then
 		-- FFA: remove team-specific objectives from tracking
