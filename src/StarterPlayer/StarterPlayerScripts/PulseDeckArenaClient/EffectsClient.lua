@@ -995,8 +995,6 @@ function EffectsClient.Init()
 			end)
 		end
 
-	end
-
 	elseif etype == "BombPlant" then
 		local beacon = Instance.new("Part")
 		beacon.Name = "BombBeacon"

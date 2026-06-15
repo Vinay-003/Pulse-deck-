@@ -594,6 +594,8 @@ function AbilitySystem.UseAbility(hero, payload)
 	-- === STEALTH: CLOAK AND DAGGER ===
 end
 
+end
+
 function AbilitySystem.UseUltimate(hero)
 	if not hero.UltimateId then return end
 	local cfg = AbilityConfig[hero.UltimateId]

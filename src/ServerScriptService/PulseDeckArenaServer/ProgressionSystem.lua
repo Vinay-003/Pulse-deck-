@@ -13,7 +13,14 @@ ProgressionSystem.Profiles = {}
 ProgressionSystem.DataStoreAvailable = true
 ProgressionSystem.WarnedFallback = false
 
-local store = DataStoreService:GetDataStore("PulseDeckArenaProfiles_v2")
+local store = nil
+local storeOk, storeErr = pcall(function()
+	store = DataStoreService:GetDataStore("PulseDeckArenaProfiles_v2")
+end)
+if not storeOk then
+	warn("[PDA] DataStore unavailable (Studio mode): " .. tostring(storeErr))
+	ProgressionSystem.DataStoreAvailable = false
+end
 
 local function defaultProfile()
 	return {

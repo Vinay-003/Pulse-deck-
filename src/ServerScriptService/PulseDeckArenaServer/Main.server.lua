@@ -5,19 +5,33 @@ local Debris = game:GetService("Debris")
 local MarketplaceService = game:GetService("MarketplaceService")
 local Teams = game:GetService("Teams")
 
+print("[PDA] Server starting...")
+
 local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
+print("[PDA] Got Shared root")
 local Config = require(sharedRoot:WaitForChild("Config"))
+print("[PDA] Loaded Config")
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
+print("[PDA] Loaded HeroConfig")
 local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
+print("[PDA] Loaded WeaponConfig")
 local Util = require(sharedRoot:WaitForChild("Util"))
+print("[PDA] Loaded Util")
 
 local MapBuilder = require(script.Parent:WaitForChild("MapBuilder"))
+print("[PDA] Loaded MapBuilder")
 local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
+print("[PDA] Loaded MatchSystem")
 local HeroSystem = require(script.Parent:WaitForChild("HeroSystem"))
+print("[PDA] Loaded HeroSystem")
 local CombatSystem = require(script.Parent:WaitForChild("CombatSystem"))
+print("[PDA] Loaded CombatSystem")
 local AISystem = require(script.Parent:WaitForChild("AISystem"))
+print("[PDA] Loaded AISystem")
 local AbilitySystem = require(script.Parent:WaitForChild("AbilitySystem"))
+print("[PDA] Loaded AbilitySystem")
 local ProgressionSystem = require(script.Parent:WaitForChild("ProgressionSystem"))
+print("[PDA] Loaded ProgressionSystem")
 
 local function ensureWorld()
 	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
@@ -35,9 +49,12 @@ local function ensureWorld()
 	end
 end
 
+print("[PDA] All modules loaded. Building world...")
 ensureWorld()
+print("[PDA] ensureWorld done. Building map...")
 
 MapBuilder.BuildNeonFoundry()
+print("[PDA] Map built!")
 
 -- Initialize core systems at startup
 AbilitySystem.Init(HeroSystem, MatchSystem, CombatSystem)
