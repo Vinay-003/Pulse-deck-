@@ -629,15 +629,17 @@ function HeroSystem.KillHero(hero, attackerId)
 	end
 end
 
-function HeroSystem.RespawnHero(hero)
+	function HeroSystem.RespawnHero(hero)
 	hero.Alive = true
 	hero.Health = hero.MaxHealth
 	hero.ShieldHealth = hero.MaxShield
 	hero.Humanoid.MaxHealth = hero.MaxHealth
 	hero.Humanoid.Health = hero.MaxHealth
 	local weapon = WeaponConfig[hero.WeaponId]
-	hero.Ammo = weapon.magazineSize
-	hero.ReserveAmmo = weapon.reserveAmmo or (weapon.magazineSize * 3)
+	if weapon then
+		hero.Ammo = weapon.magazineSize
+		hero.ReserveAmmo = weapon.reserveAmmo or (weapon.magazineSize * 3)
+	end
 	hero.IsReloading = false
 	hero.ReloadEndAt = 0
 	hero.AbilityReadyAt = os.clock()

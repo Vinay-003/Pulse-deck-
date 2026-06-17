@@ -141,15 +141,15 @@ function CameraClient.Init()
 		-- Mouse delta rotates camera (yaw + pitch)
 		local mouseDelta = UserInputService:GetMouseDelta()
 		local sensitivity = 0.002
-		CameraClient.Yaw = CameraClient.Yaw - mouseDelta.X * sensitivity
-		CameraClient.Pitch = math.clamp(CameraClient.Pitch - mouseDelta.Y * sensitivity, -80, 80)
+		CameraClient.Yaw = CameraClient.Yaw + mouseDelta.X * sensitivity
+		CameraClient.Pitch = math.clamp(CameraClient.Pitch + mouseDelta.Y * sensitivity, -80, 80)
 
 		-- Player movement relative to camera yaw
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
 		if humanoid and humanoid.Health > 0 then
 			local yaw = CameraClient.Yaw
 			local camForward = Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
-			local camRight = Vector3.new(-math.cos(yaw), 0, math.sin(yaw))
+			local camRight = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
 
 			local moveDir = Vector3.new(0, 0, 0)
 			if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camForward end

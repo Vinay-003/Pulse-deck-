@@ -260,10 +260,10 @@ local function getFireOrigin(hero)
 	return origin
 end
 
-local function canFire(hero, weapon)
+	local function canFire(hero, weapon)
 	if not hero.Alive then return false end
 	if hero.IsReloading then return false end
-	if hero.Ammo <= 0 then return false end
+	if not hero.Ammo or hero.Ammo <= 0 then return false end
 	if os.clock() < hero.NextFireAt then return false end
 	if hero.Stunned then return false end
 	if hero.Model and hero.Model:GetAttribute("IsControlled") == false then return false end
