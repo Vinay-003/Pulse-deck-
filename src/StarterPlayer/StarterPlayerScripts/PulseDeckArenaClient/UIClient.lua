@@ -136,6 +136,31 @@ local function createProgressBar(parent, size, pos, color, bgColor)
 	return bg, fill
 end
 
+local function animateScreenIn(screen, duration)
+	local bg = screen:FindFirstChildOfClass("Frame")
+	if not bg then return end
+	local ogSize = bg.Size
+	local ogTrans = bg.BackgroundTransparency
+	bg.Size = UDim2.new(ogSize.X.Scale * 0.5, ogSize.X.Offset, ogSize.Y.Scale, ogSize.Y.Offset)
+	bg.BackgroundTransparency = 1
+	local t1 = TweenService:Create(bg, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
+		Size = ogSize, BackgroundTransparency = ogTrans,
+	})
+	t1:Play()
+end
+
+local function animateScreenOut(screen, duration)
+	local bg = screen:FindFirstChildOfClass("Frame")
+	if not bg then return end
+	local ogSize = bg.Size
+	local t1 = TweenService:Create(bg, TweenInfo.new(duration or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
+		Size = UDim2.new(ogSize.X.Scale * 0.5, ogSize.X.Offset, ogSize.Y.Scale, ogSize.Y.Offset),
+		BackgroundTransparency = 1,
+	})
+	t1:Play()
+	t1.Completed:Wait()
+end
+
 -----------------------------------------------------
 -- MAIN MENU
 -----------------------------------------------------
@@ -303,6 +328,10 @@ function UIClient.BuildDeckSelect()
 	local heroCards = {}
 
 	local function buildGrid()
+		for _, child in ipairs(grid:GetChildren()) do
+			if child:IsA("Frame") then child:Destroy() end
+		end
+
 		local heroes = {}
 		for id, _ in pairs(HeroConfig) do
 			table.insert(heroes, id)
@@ -416,8 +445,6 @@ function UIClient.BuildDeckSelect()
 		grid.CanvasSize = UDim2.new(0, 0, 0, math.ceil(#heroes / 4) * 148 + 10)
 	end
 
-	buildGrid()
-
 	-- Bottom controls row (below the grid)
 	local bottomY = 430
 
@@ -432,21 +459,41 @@ function UIClient.BuildDeckSelect()
 		Color3.fromRGB(200, 200, 220), Enum.Font.GothamBold)
 
 	-- Confirm button
-	local confirmBtn = createTextButton(screen, "CONFIRM DECK & START MATCH",
-		UDim2.new(0, 260, 0, 44), UDim2.new(0.5, -130, 0, bottomY + 42),
-		Color3.fromRGB(60, 180, 100), Color3.fromRGB(80, 210, 130))
+	local confirmBtn = createTextButton(screen, "PICK 5 MORE",
+		UDim2.new(0, 220, 0, 40), UDim2.new(0.5, -110, 0, bottomY + 46),
+		Color3.fromRGB(60, 60, 80), Color3.fromRGB(80, 80, 110))
 	confirmBtn.Font = Enum.Font.GothamBlack
-	confirmBtn.TextSize = 16
+	confirmBtn.TextSize = 13
+	confirmBtn.BackgroundTransparency = 0.3
 	confirmBtn.MouseButton1Click:Connect(function()
-		if #UIClient.SelectedDeck == Config.DECK_SIZE then
+		if #UIClient.SelectedDeck == Config.DECK_SIZE and confirmBtn.Text ~= "STARTING..." then
+			confirmBtn.Text = "STARTING..."
+			confirmBtn.BackgroundColor3 = Color3.fromRGB(40, 140, 80)
+			confirmBtn.Active = false
 			ClientCore.Fire("RequestDeckUpdate", { heroIds = UIClient.SelectedDeck })
 			ClientCore.Fire("RequestStartMatch", {})
 		end
 	end)
 
+	-- Update confirm button state when selections change
+	local origBuildGrid = buildGrid
+	buildGrid = function()
+		origBuildGrid()
+		if #UIClient.SelectedDeck == Config.DECK_SIZE then
+			confirmBtn.Text = "CONFIRM & START"
+			confirmBtn.BackgroundColor3 = Color3.fromRGB(60, 180, 100)
+			confirmBtn.BackgroundTransparency = 0
+		else
+			confirmBtn.Text = "PICK " .. (Config.DECK_SIZE - #UIClient.SelectedDeck) .. " MORE"
+			confirmBtn.BackgroundColor3 = Color3.fromRGB(60, 60, 80)
+			confirmBtn.BackgroundTransparency = 0.3
+		end
+	end
+	buildGrid()
+
 	-- Back button
 	local backBtn = createTextButton(screen, "BACK",
-		UDim2.new(0, 100, 0, 36), UDim2.new(0.5, -170, 0, bottomY + 46),
+		UDim2.new(0, 80, 0, 36), UDim2.new(0.5, -230, 0, bottomY + 48),
 		Color3.fromRGB(60, 60, 80), Color3.fromRGB(80, 80, 110))
 	backBtn.TextSize = 13
 	backBtn.MouseButton1Click:Connect(function()
@@ -455,7 +502,7 @@ function UIClient.BuildDeckSelect()
 
 	-- Skin selector
 	local skinBtn = createTextButton(screen, "SKINS",
-		UDim2.new(0, 100, 0, 36), UDim2.new(0.5, 70, 0, bottomY + 46),
+		UDim2.new(0, 80, 0, 36), UDim2.new(0.5, 150, 0, bottomY + 48),
 		Color3.fromRGB(120, 60, 180), Color3.fromRGB(160, 90, 220))
 	skinBtn.TextSize = 13
 	skinBtn.Font = Enum.Font.GothamSemibold
@@ -602,9 +649,9 @@ function UIClient.ShowSkinPanel()
 			if skinId == "default" then return end
 			if equipText == "EQUIP" then
 				if progression and progression.Coins and progression.Coins >= cost then
-					ProgressionSystem.EquipSkin(nil, heroId, skinId)
+					ClientCore.Fire("RequestPurchase", { itemId = "skin_" .. heroId .. "_" .. skinId })
 				elseif progression and table.find(progression.OwnedSkins or {}, heroId .. "_" .. skinId) then
-					ProgressionSystem.EquipSkin(nil, heroId, skinId)
+					ClientCore.Fire("RequestPurchase", { itemId = "equip_skin_" .. heroId .. "_" .. skinId })
 				end
 				bg:Destroy()
 				UIClient.SkinPanel = nil
@@ -636,69 +683,63 @@ function UIClient.BuildHUD()
 	UIClient.ScoreLabel = createTextLabel(topBar, "RED 0 : 0 BLUE",
 		UDim2.new(0, 280, 0, 28), UDim2.new(0.5, -140, 0, 24), 20,
 		Color3.fromRGB(255, 245, 230), Enum.Font.GothamBlack)
+	UIClient.ScoreLabel.RichText = true
 
 	UIClient.TimerLabel = createTextLabel(topBar, "5:00",
 		UDim2.new(0, 80, 0, 28), UDim2.new(1, -90, 0, 2), 22,
 		Color3.fromRGB(255, 240, 220), Enum.Font.GothamBlack)
 
-	-- Health & Shield bars
+	-- Health & Shield bars (compact bottom-left)
 	local bottomBar = createRoundedFrame(screen, "BottomBar",
-		UDim2.new(0, 500, 0, 130), UDim2.new(0.5, -250, 1, -140),
+		UDim2.new(0, 320, 0, 70), UDim2.new(0, 16, 1, -86),
 		Color3.fromRGB(10, 12, 20, 200), 0.4, 10)
 	bottomBar.ZIndex = 10
 
-	createTextLabel(bottomBar, "HEALTH", UDim2.new(0, 80, 0, 18), UDim2.new(0, 12, 0, 8), 11,
+	createTextLabel(bottomBar, "HP", UDim2.new(0, 24, 0, 14), UDim2.new(0, 8, 0, 6), 10,
 		Color3.fromRGB(180, 60, 60), Enum.Font.GothamBold)
 
 	UIClient.HealthBarBG, UIClient.HealthBarFill = createProgressBar(bottomBar,
-		UDim2.new(0, 280, 0, 20), UDim2.new(0, 12, 0, 28),
+		UDim2.new(0, 200, 0, 14), UDim2.new(0, 36, 0, 8),
 		Color3.fromRGB(200, 50, 50), Color3.fromRGB(30, 15, 15))
 
-	createTextLabel(bottomBar, "SHIELD", UDim2.new(0, 80, 0, 18), UDim2.new(0, 12, 0, 52), 11,
+	createTextLabel(bottomBar, "SP", UDim2.new(0, 24, 0, 14), UDim2.new(0, 8, 0, 28), 10,
 		Color3.fromRGB(80, 120, 200), Enum.Font.GothamBold)
 
 	UIClient.ShieldBarBG, UIClient.ShieldBarFill = createProgressBar(bottomBar,
-		UDim2.new(0, 280, 0, 20), UDim2.new(0, 12, 0, 62),
+		UDim2.new(0, 200, 0, 14), UDim2.new(0, 36, 0, 30),
 		Color3.fromRGB(80, 140, 255), Color3.fromRGB(15, 25, 45))
 
-	createTextLabel(bottomBar, "ABILITY [Q]", UDim2.new(0, 80, 0, 18), UDim2.new(0, 12, 0, 86), 11,
+	createTextLabel(bottomBar, "AB", UDim2.new(0, 24, 0, 14), UDim2.new(0, 8, 0, 50), 10,
 		Color3.fromRGB(200, 150, 50), Enum.Font.GothamBold)
 
 	UIClient.AbilityBarBG, UIClient.AbilityBarFill = createProgressBar(bottomBar,
-		UDim2.new(0, 280, 0, 18), UDim2.new(0, 12, 0, 104),
+		UDim2.new(0, 200, 0, 10), UDim2.new(0, 36, 0, 53),
 		Color3.fromRGB(200, 160, 40), Color3.fromRGB(30, 25, 10))
 
-	createTextLabel(bottomBar, "ULTIMATE [E]", UDim2.new(0, 80, 0, 16), UDim2.new(0, 12, 0, 126), 11,
-		Color3.fromRGB(180, 60, 200), Enum.Font.GothamBold)
-
-	UIClient.UltimateBarBG, UIClient.UltimateBarFill = createProgressBar(bottomBar,
-		UDim2.new(0, 280, 0, 16), UDim2.new(0, 12, 0, 142),
-		Color3.fromRGB(160, 40, 200), Color3.fromRGB(30, 10, 45))
-
-	-- Ammo display
+	-- Ammo display (bottom-right)
 	local ammoFrame = createRoundedFrame(screen, "AmmoFrame",
-		UDim2.new(0, 200, 0, 60), UDim2.new(1, -220, 0.5, -30),
+		UDim2.new(0, 160, 0, 50), UDim2.new(1, -176, 1, -86),
 		Color3.fromRGB(10, 12, 20, 200), 0.4, 8)
 	ammoFrame.ZIndex = 10
 
 	UIClient.AmmoLabel = createTextLabel(ammoFrame, "42 / 126",
-		UDim2.fromScale(1, 0.55), UDim2.new(0, 0, 0.1, 0), 24,
+		UDim2.fromScale(1, 0.5), UDim2.new(0, 0, 0.05, 0), 22,
 		Color3.fromRGB(240, 240, 255), Enum.Font.GothamBlack)
 
 	UIClient.WeaponNameLabel = createTextLabel(ammoFrame, "PULSE RIFLE",
-		UDim2.fromScale(1, 0.4), UDim2.new(0, 0, 0.55, 0), 14,
+		UDim2.fromScale(1, 0.4), UDim2.new(0, 0, 0.55, 0), 11,
 		Color3.fromRGB(150, 160, 170), Enum.Font.GothamSemibold)
 
-	-- Hero switcher buttons
+	-- Hero switcher buttons (bottom center)
 	local heroBar = createRoundedFrame(screen, "HeroBar",
-		UDim2.new(0, 500, 0, 52), UDim2.new(0.5, -250, 1, -62),
+		UDim2.new(0, 360, 0, 40), UDim2.new(0.5, -180, 1, -44),
 		Color3.fromRGB(10, 12, 20, 180), 0.3, 10)
 
 	for i = 1, 5 do
 		local btn = createTextButton(heroBar, tostring(i),
-			UDim2.new(0, 92, 0, 44), UDim2.new(0, (i - 1) * 100, 0, 0),
+			UDim2.new(0, 64, 0, 32), UDim2.new(0, (i - 1) * 72 + 4, 0, 4),
 			Color3.fromRGB(40, 44, 60), Color3.fromRGB(60, 64, 80))
-		btn.TextSize = 16
+		btn.TextSize = 14
 		btn.Font = Enum.Font.GothamSemibold
 		btn.MouseButton1Click:Connect(function()
 			ClientCore.Fire("RequestSwitchHero", { slot = i })
@@ -708,18 +749,18 @@ function UIClient.BuildHUD()
 
 	-- Ability button (overlay)
 	UIClient.AbilityButton = createTextButton(screen, "Q",
-		UDim2.new(0, 56, 0, 56), UDim2.new(0, 20, 1, -76),
+		UDim2.new(0, 48, 0, 48), UDim2.new(0, 16, 1, -148),
 		Color3.fromRGB(30, 30, 45), Color3.fromRGB(70, 200, 150))
-	UIClient.AbilityButton.TextSize = 20
+	UIClient.AbilityButton.TextSize = 18
 	UIClient.AbilityButton.Font = Enum.Font.GothamBold
 	UIClient.AbilityButton.ZIndex = 20
 	UIClient.AbilityButton.TextColor3 = Color3.fromRGB(255, 240, 200)
 
 	-- Ultimate button
 	UIClient.UltimateButton = createTextButton(screen, "E",
-		UDim2.new(0, 64, 0, 64), UDim2.new(1, -84, 1, -84),
+		UDim2.new(0, 48, 0, 48), UDim2.new(1, -64, 1, -148),
 		Color3.fromRGB(120, 40, 180), Color3.fromRGB(160, 60, 220))
-	UIClient.UltimateButton.TextSize = 22
+	UIClient.UltimateButton.TextSize = 18
 	UIClient.UltimateButton.Font = Enum.Font.GothamBlack
 	UIClient.UltimateButton.ZIndex = 20
 	UIClient.UltimateButton.TextColor3 = Color3.fromRGB(255, 240, 255)
@@ -1414,32 +1455,24 @@ end
 
 local RunService = game:GetService("RunService")
 
-local function animateScreenIn(screen, duration)
-	local bg = screen:FindFirstChildOfClass("Frame")
-	if not bg then return end
-	local ogSize = bg.Size
-	local ogTrans = bg.BackgroundTransparency
-	bg.Size = UDim2.new(ogSize.X.Scale * 0.5, ogSize.X.Offset, ogSize.Y.Scale, ogSize.Y.Offset)
-	bg.BackgroundTransparency = 1
-	local t1 = TweenService:Create(bg, TweenInfo.new(duration or 0.3, Enum.EasingStyle.Quad, Enum.EasingDirection.Out), {
-		Size = ogSize, BackgroundTransparency = ogTrans,
-	})
-	t1:Play()
-end
-
-local function animateScreenOut(screen, duration)
-	local bg = screen:FindFirstChildOfClass("Frame")
-	if not bg then return end
-	local ogSize = bg.Size
-	local t1 = TweenService:Create(bg, TweenInfo.new(duration or 0.15, Enum.EasingStyle.Quad, Enum.EasingDirection.In), {
-		Size = UDim2.new(ogSize.X.Scale * 0.5, ogSize.X.Offset, ogSize.Y.Scale, ogSize.Y.Offset),
-		BackgroundTransparency = 1,
-	})
-	t1:Play()
-	t1.Completed:Wait()
-end
-
 function UIClient.Show(screenName)
+	-- Close any open overlay panels
+	if UIClient.SettingsFrame then
+		UIClient.SettingsFrame.Visible = false
+	end
+	if UIClient.SkinPanel then
+		UIClient.SkinPanel:Destroy()
+		UIClient.SkinPanel = nil
+	end
+	-- Also destroy any lingering overlay panels parented to Gui
+	if UIClient.Gui then
+		for _, child in ipairs(UIClient.Gui:GetChildren()) do
+			if child.Name == "SettingsPanel" or child.Name == "SkinPanel" or child.Name == "SettingsFrame" then
+				child:Destroy()
+			end
+		end
+	end
+
 	for _, screen in ipairs({
 		UIClient.MainMenu, UIClient.DeckSelect, UIClient.HUD,
 		UIClient.Scoreboard, UIClient.PostMatch
@@ -1611,7 +1644,6 @@ function UIClient.BindState()
 		frame.Parent = UIClient.KillfeedContainer
 
 		Instance.new("UICorner", frame)
-		frame.CornerRadius = UDim.new(0, 4)
 
 		local wColors = {
 			pulse_rifle = Color3.fromRGB(255, 230, 45), rail_lance = Color3.fromRGB(170, 85, 255),
@@ -2124,6 +2156,13 @@ function UIClient.Init()
 	UIClient.HUD.ResetOnSpawn = false
 	UIClient.HUD.ZIndexBehavior = Enum.ZIndexBehavior.Sibling
 	UIClient.HUD.Parent = gui
+
+	-- Scale HUD for mobile (touch devices)
+	if game:GetService("UserInputService").TouchEnabled then
+		local uiScale = Instance.new("UIScale")
+		uiScale.Scale = 0.55
+		uiScale.Parent = UIClient.HUD
+	end
 
 	UIClient.Scoreboard = Instance.new("ScreenGui")
 	UIClient.Scoreboard.Name = "Scoreboard"

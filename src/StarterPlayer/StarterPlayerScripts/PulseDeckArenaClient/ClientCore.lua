@@ -50,12 +50,18 @@ function ClientCore.Init()
         RequestAbility = remotes:WaitForChild("RequestAbility"),
         RequestCameraMode = remotes:WaitForChild("RequestCameraMode"),
         RequestScoreboard = remotes:WaitForChild("RequestScoreboard"),
-        RequestBuy = remotes:FindFirstChild("RequestBuy"),
-        RequestBuyMenu = remotes:FindFirstChild("RequestBuyMenu"),
-        RequestPlant = remotes:FindFirstChild("RequestPlant"),
-        RequestDefuse = remotes:FindFirstChild("RequestDefuse"),
-        CancelDefuse = remotes:FindFirstChild("CancelDefuse"),
-        BombDefuseProgress = remotes:FindFirstChild("BombDefuseProgress"),
+        RequestUltimate = remotes:WaitForChild("RequestUltimate"),
+        RequestPower = remotes:WaitForChild("RequestPower"),
+        RequestReady = remotes:WaitForChild("RequestReady"),
+        RequestGameMode = remotes:WaitForChild("RequestGameMode"),
+        RequestPurchase = remotes:WaitForChild("RequestPurchase"),
+        RequestPracticeDummy = remotes:WaitForChild("RequestPracticeDummy"),
+        RequestBuy = remotes:WaitForChild("RequestBuy"),
+        RequestBuyMenu = remotes:WaitForChild("RequestBuyMenu"),
+        RequestPlant = remotes:WaitForChild("RequestPlant"),
+        RequestDefuse = remotes:WaitForChild("RequestDefuse"),
+        CancelDefuse = remotes:WaitForChild("CancelDefuse"),
+        BombDefuseProgress = remotes:WaitForChild("BombDefuseProgress"),
         MatchStateChanged = remotes:WaitForChild("MatchStateChanged"),
         HeroStateSnapshot = remotes:WaitForChild("HeroStateSnapshot"),
         ObjectiveStateChanged = remotes:WaitForChild("ObjectiveStateChanged"),
@@ -138,7 +144,7 @@ function ClientCore.Init()
 
     ClientCore.Remotes.BombDefuseProgress.OnClientEvent:Connect(function(payload)
         ClientCore.State.defusingProgress = math.max(0, payload.progress or 0)
-        ClientCore.State.isDefusing = payload.progress >= 0
+        ClientCore.State.isDefusing = (payload.progress or 0) >= 0
     end)
 
     ClientCore.Fire("ClientReady", {})

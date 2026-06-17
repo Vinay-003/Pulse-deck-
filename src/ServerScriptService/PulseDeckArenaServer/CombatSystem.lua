@@ -1,9 +1,12 @@
 
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
 local Config = require(sharedRoot:WaitForChild("Config"))
 local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
+local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
+local Util = require(sharedRoot:WaitForChild("Util"))
 
 local CombatSystem = {}
 
@@ -472,6 +475,11 @@ function CombatSystem.ApplyDamage(attacker, target, amount, damageType, isHeadsh
 	end
 
 	return finalAmount
+end
+
+local function getEffectsFolder()
+	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
+	return world and world:FindFirstChild("Effects") or workspace
 end
 
 function CombatSystem.FireWeapon(hero, direction)
@@ -1093,6 +1101,7 @@ function CombatSystem.FireWeapon(hero, direction)
 end
 
 function CombatSystem.DamageRadius(ownerHero, position, radius, damage, objectiveMultiplier)
+	local HeroSystem = require(script.Parent:WaitForChild("HeroSystem"))
 	for _, hero in pairs(HeroSystem.HeroesByGuid) do
 		if hero.Alive and hero.TeamId ~= ownerHero.TeamId and (hero.Root.Position - position).Magnitude <= radius then
 			CombatSystem.ApplyDamage(ownerHero, hero, damage)
@@ -1170,6 +1179,7 @@ function CombatSystem.CreatePickup(pickupType, position)
 		if not CombatSystem.ActivePickups[guid] then return end
 		if not CombatSystem.ActivePickups[guid].active then return end
 
+		local HeroSystem = require(script.Parent:WaitForChild("HeroSystem"))
 		local hero = HeroSystem.GetHeroFromPart(hit)
 		if not hero or not hero.Alive then return end
 

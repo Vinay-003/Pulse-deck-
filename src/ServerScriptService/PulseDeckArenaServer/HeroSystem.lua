@@ -15,6 +15,16 @@ HeroSystem.HeroesByOwner = {}
 HeroSystem.PartToHero = {}
 HeroSystem.ControlledHero = {}
 
+local function getMatchSystem()
+	local ok, ms = pcall(require, script.Parent:WaitForChild("MatchSystem"))
+	return ok and ms or nil
+end
+
+local function getProgressionSystem()
+	local ok, ps = pcall(require, script.Parent:WaitForChild("ProgressionSystem"))
+	return ok and ps or nil
+end
+
 -- Enhanced ragdoll / visual states
 local DEBRIEF_DURATION = 10
 
@@ -422,8 +432,9 @@ function HeroSystem.SpawnHeroesForOwner(ownerId, teamId, deck, ownerPlayer)
 		local guid = HttpService:GenerateGUID(false)
 		-- Determine skin: use equipped skin from progression if available
 		local skinId = "default"
-		if ownerPlayer and ProgressionSystem and ProgressionSystem.Profiles then
-			local profile = ProgressionSystem.Profiles[ownerPlayer.UserId]
+		local ps = getProgressionSystem()
+		if ownerPlayer and ps and ps.Profiles then
+			local profile = ps.Profiles[ownerPlayer.UserId]
 			if profile and profile.EquippedSkin then
 				-- Verify the skin is unlocked
 				local heroDef = HeroConfig[heroId]
@@ -439,7 +450,8 @@ function HeroSystem.SpawnHeroesForOwner(ownerId, teamId, deck, ownerPlayer)
 		local ffaList = Config.MAP.FFA_SPAWNS
 
 		local spawnPos
-		if MatchSystem.GameMode == "FFA" then
+		local ms = getMatchSystem()
+		if ms and ms.GameMode == "FFA" then
 			spawnPos = ffaList[(slot - 1) % #ffaList + 1]
 		else
 			spawnPos = spawnList[slot % #spawnList + 1]
@@ -449,7 +461,7 @@ function HeroSystem.SpawnHeroesForOwner(ownerId, teamId, deck, ownerPlayer)
 
 		local heroDef = HeroConfig[heroId]
 		local weaponId = heroDef.weaponId
-		local weapon = WeaponConfig[weaponId]
+		local weapon = WeaponConfig[weaponId] or {}
 
 		local hero = {
 			Guid = guid,
@@ -468,8 +480,8 @@ function HeroSystem.SpawnHeroesForOwner(ownerId, teamId, deck, ownerPlayer)
 			WeaponId = weaponId,
 			AbilityId = heroDef.abilityId,
 			UltimateId = heroDef.ultimateId,
-			Ammo = weapon.magazineSize,
-			ReserveAmmo = weapon.reserveAmmo or (weapon.magazineSize * 3),
+			Ammo = weapon.magazineSize or 30,
+			ReserveAmmo = weapon.reserveAmmo or ((weapon.magazineSize or 30) * 3),
 			IsReloading = false,
 			ReloadEndAt = 0,
 			AbilityReadyAt = 0,
@@ -658,7 +670,8 @@ function HeroSystem.RespawnHero(hero)
 	local spawnList = (hero.TeamId == Config.TEAM_RED) and Config.MAP.RED_SPAWN_PADS or Config.MAP.BLUE_SPAWN_PADS
 	local ffaList = Config.MAP.FFA_SPAWNS
 	local spawnPos
-	if MatchSystem.GameMode == "FFA" then
+	local ms2 = getMatchSystem()
+	if ms2 and ms2.GameMode == "FFA" then
 		spawnPos = ffaList[math.random(1, #ffaList)]
 	else
 		spawnPos = spawnList[math.random(1, #spawnList)]

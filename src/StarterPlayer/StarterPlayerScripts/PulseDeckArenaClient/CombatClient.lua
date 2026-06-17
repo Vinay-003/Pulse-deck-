@@ -184,6 +184,7 @@ function CombatClient.RenderMuzzleFlash(position, direction, color)
 end
 
 function CombatClient.RenderBlinkEffect(startPos, endPos, duration, color)
+	if not startPos or not endPos then return end
 	local att0 = Instance.new("Attachment")
 	att0.Position = startPos
 	att0.Parent = workspace
@@ -578,12 +579,12 @@ function CombatClient.RenderGravityWellPulse(position, radius, color)
 end
 
 function CombatClient.RenderTrail(startPos, endPos, color, duration)
+	if not startPos or not endPos then return end
 	local trail = Instance.new("Trail")
 	trail.Name = "DashTrail"
 	trail.Color = ColorSequence.new(color, Color3.fromRGB(0, 0, 0))
 	trail.Transparency = NumberSequence.new(0, 1)
 	trail.Lifetime = duration or 0.5
-	trail.MinPixelWidth = 4
 	trail.LightEmission = 1
 	trail.Parent = workspace
 

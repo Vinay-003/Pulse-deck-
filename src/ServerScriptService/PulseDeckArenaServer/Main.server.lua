@@ -10,6 +10,9 @@ local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
 local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
 local Util = require(sharedRoot:WaitForChild("Util"))
+local AbilityConfig = require(sharedRoot:WaitForChild("AbilityConfig"))
+
+local BURN_TICK_INTERVAL = 0.5
 
 local MapBuilder = require(script.Parent:WaitForChild("MapBuilder"))
 local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
@@ -193,7 +196,7 @@ requestFire.OnServerEvent:Connect(function(player, payload)
 	local weapon = WeaponConfig[hero.WeaponId]
 	if weapon then
 		local minInterval = weapon.fireInterval or 0.1
-		if os.clock() - hero.LastFireAt < minInterval * 0.8 then return end
+		if hero.LastFireAt and os.clock() - hero.LastFireAt < minInterval * 0.8 then return end
 		hero.LastFireAt = os.clock()
 	end
 
@@ -592,7 +595,8 @@ MatchSystem.OnEnded(function(winnerTeam)
 			ProgressionSystem.SyncLeaderstats(player)
 		end
 
-		ProgressionSystem.AwardMatch(player, result, MatchSystem.Score or 0)
+		local totalScore = (MatchSystem.Score.Red or 0) + (MatchSystem.Score.Blue or 0)
+		ProgressionSystem.AwardMatch(player, result, totalScore)
 		ProgressionSystem.Save(player)
 	end
 

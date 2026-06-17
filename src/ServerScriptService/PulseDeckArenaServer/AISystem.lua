@@ -347,9 +347,11 @@ function AISystem.Init(heroSystem, matchSystem, combatSystem, abilitySystem)
 				if hero.ActiveEffects and hero.ActiveEffects.overcharge then
 					local hd = HeroConfig[hero.HeroId]
 					hero.Humanoid.WalkSpeed = hd.walkSpeed * hero.ActiveEffects.overcharge.SpeedMultiplier
-				end
-				if hero.ActiveEffects and hero.ActiveEffects.fortify then
+				elseif hero.ActiveEffects and hero.ActiveEffects.fortify then
 					hero.Humanoid.WalkSpeed = 0.01
+				elseif hero.AISpeedMult then
+					local hd = HeroConfig[hero.HeroId]
+					hero.Humanoid.WalkSpeed = hd.walkSpeed * hero.AISpeedMult
 				end
 				if not followPath(hero) then
 					if hero.AIPathGoal then
@@ -381,6 +383,12 @@ function AISystem.EnableHeroAI(hero, enabled)
 		hero.AIPath = nil
 		hero.AIPathGoal = nil
 		hero.AIThinkNextTick = 0
+		-- Random walk speed variation per bot (80%-120% of base)
+		local hd = HeroConfig[hero.HeroId]
+		if hd and hero.Humanoid then
+			hero.AISpeedMult = 0.85 + math.random() * 0.3
+			hero.Humanoid.WalkSpeed = hd.walkSpeed * hero.AISpeedMult
+		end
 	end
 end
 
@@ -449,8 +457,28 @@ function AISystem.AdvanceLane(hero)
 	end
 	local idx = hero.AIWaypointIndex
 	local target = ordered[idx]
-	moveToPosition(hero, target, nil, true)
-	if (hero.Root.Position - target).Magnitude < 5 then
+
+	-- Add wobble offset for natural movement
+	local wobble = Vector3.new(
+		math.sin(tick() * 0.7 + hero.Guid:byte(1)) * 2,
+		0,
+		math.cos(tick() * 0.5 + hero.Guid:byte(2)) * 2
+	)
+
+	-- Random brief pause (look around)
+	if math.random() < 0.01 and idx < #ordered then
+		hero.Humanoid:MoveTo(hero.Root.Position)
+		hero.AILookTimer = (hero.AILookTimer or 0) + 1
+		if hero.AILookTimer > 3 then
+			hero.AILookTimer = 0
+			moveToPosition(hero, target + wobble, nil, true)
+		end
+		return
+	end
+	hero.AILookTimer = 0
+
+	moveToPosition(hero, target + wobble, nil, true)
+	if (hero.Root.Position - target).Magnitude < 6 then
 		hero.AIWaypointIndex = math.clamp(idx + 1, 1, #ordered)
 	end
 end
@@ -482,10 +510,36 @@ end
 function AISystem.StrafeCombat(hero, enemy)
 	local dirToEnemy = (hero.Root.Position - enemy.Root.Position).Unit
 	local perp = Vector3.new(-dirToEnemy.Z, 0, dirToEnemy.X)
-	if not hero.AIStrafeDir or math.random() < 0.05 then
+
+	-- Random strafe pattern switch
+	if not hero.AIStrafeDir or math.random() < 0.08 then
 		hero.AIStrafeDir = math.random() > 0.5 and 1 or -1
+		hero.AIStrafeMode = math.random(1, 3) -- 1=linear, 2=circular, 3=diagonal
 	end
-	local strafeTarget = hero.Root.Position + perp * hero.AIStrafeDir * 8 + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
+
+	local strafeTarget
+	if hero.AIStrafeMode == 2 then
+		-- Circular strafe around enemy
+		local angle = (hero.AIStrafeDir * 1.5) + math.sin(tick() * 2 + hero.Guid:byte(1)) * 0.5
+		local around = CFrame.new(hero.Root.Position, enemy.Root.Position)
+		around = around * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, 6)
+		strafeTarget = around.Position
+	elseif hero.AIStrafeMode == 3 then
+		-- Diagonal strafe (forward + side)
+		local diag = (dirToEnemy * hero.AIStrafeDir * -0.5 + perp * hero.AIStrafeDir).Unit
+		strafeTarget = hero.Root.Position + diag * 8 + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
+	else
+		-- Linear strafe
+		strafeTarget = hero.Root.Position + perp * hero.AIStrafeDir * 8 + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
+	end
+
+	-- Random brief pause (like a real player hesitating)
+	if math.random() < 0.03 and (hero.Root.Position - (hero.AILastStrafePos or hero.Root.Position)).Magnitude < 1 then
+		hero.Humanoid:MoveTo(hero.Root.Position)
+		return
+	end
+	hero.AILastStrafePos = strafeTarget
+
 	strafeTarget = Vector3.new(
 		math.clamp(strafeTarget.X, -135, 135),
 		strafeTarget.Y,
@@ -592,22 +646,40 @@ function AISystem.Think(hero)
 	local target, targetDist = AISystem.FindNearestEnemy(hero, range * 1.2)
 
 	if target then
-		local hasCover = isBehindCover(hero, target)
+		local hasCover, coverPoint = isBehindCover(hero, target)
 
 		if targetDist > (range * 0.8) then
-			local moveTarget = (aiProfile and aiProfile.preferCloseRange)
-				and target.Root.Position + (hero.Root.Position - target.Root.Position).Unit * 5
-				or hero.Root.Position + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
-			hero.Humanoid:MoveTo(moveTarget)
+			-- Approaching enemy: use varied movement
+			if aiProfile and aiProfile.preferCloseRange then
+				-- Move toward enemy but not in straight line
+				local offset = Vector3.new(math.sin(tick() * 1.5 + hero.Guid:byte(1)) * 4, 0, math.cos(tick() * 1.2 + hero.Guid:byte(2)) * 4)
+				local moveTarget = target.Root.Position + offset
+				hero.Humanoid:MoveTo(moveTarget)
+			else
+				-- Sit and hold position with slight adjustment
+				if math.random() < 0.85 then
+					hero.Humanoid:MoveTo(hero.Root.Position + Vector3.new(math.sin(tick()) * 1, 0, math.cos(tick()) * 1))
+				end
+			end
 		elseif targetDist < 8 and aiProfile and aiProfile.preferCloseRange then
 			AISystem.StrafeCombat(hero, target)
 		elseif hasCover and targetDist > 10 then
-			local coverPos = findCoverPosition(hero, target)
-			if coverPos then moveToPosition(hero, coverPos, aiProfile, true) end
+			-- Peek-a-boo behavior: pop from cover, fire, go back
+			if math.random() < 0.15 and coverPoint then
+				moveToPosition(hero, coverPoint, aiProfile, true)
+			elseif math.random() < 0.3 then
+				-- Peek out and fire
+				local peekPos = target.Root.Position + (hero.Root.Position - target.Root.Position).Unit * 12
+				moveToPosition(hero, peekPos, aiProfile, false)
+			else
+				AISystem.StrafeCombat(hero, target)
+			end
 		elseif math.random() < (aiProfile and aiProfile.strafeChance or 0.3) and targetDist < 30 then
 			AISystem.StrafeCombat(hero, target)
 		else
-			hero.Humanoid:MoveTo(hero.Root.Position + Vector3.new(math.random(-1, 1), 0, math.random(-1, 1)))
+			-- Small random jitter instead of standing still
+			local jitter = Vector3.new(math.sin(tick() * 3) * 0.5, 0, math.cos(tick() * 2.5) * 0.5)
+			hero.Humanoid:MoveTo(hero.Root.Position + jitter)
 		end
 
 		local aimDir = (target.Root.Position - hero.Root.Position).Unit

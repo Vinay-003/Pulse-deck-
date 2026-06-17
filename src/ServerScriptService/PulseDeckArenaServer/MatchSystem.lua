@@ -98,16 +98,7 @@ function MatchSystem.RequestJoin(player)
 		end
 
 		MatchSystem.State = "DeckSelect"
-		MatchSystem.Timer = 15
 		MatchSystem.StartSoloCountdown()
-
-		task.spawn(function()
-			for i = 15, 1, -1 do
-				task.wait(1)
-				MatchSystem.Timer = i - 1
-			end
-			MatchSystem.BeginMatch()
-		end)
 	end
 end
 
@@ -166,6 +157,7 @@ function MatchSystem.BeginMatch()
 	task.spawn(function()
 		task.wait(Config.COUNTDOWN_DURATION)
 		MatchSystem.State = "ActiveMatch"
+		MatchSystem.Timer = Config.MATCH_DURATION
 
 		if #Players:GetPlayers() < 2 then
 			MatchSystem.EnsureBotOpponent()

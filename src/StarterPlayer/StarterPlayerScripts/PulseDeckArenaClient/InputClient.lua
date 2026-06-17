@@ -13,7 +13,7 @@ local InputClient = {}
 
 local firing = false
 local lastFireSent = 0
-local ultimateRequested = false
+local ultimateRequested = 0
 local lastSwitchTime = 0
 local inputDebounce = 0.15
 

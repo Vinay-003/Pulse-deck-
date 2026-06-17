@@ -7,6 +7,7 @@ local Config = require(sharedRoot:WaitForChild("Config"))
 local Util = require(sharedRoot:WaitForChild("Util"))
 
 local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
+local CombatClient = require(script.Parent:WaitForChild("CombatClient"))
 
 local EffectsClient = {}
 
@@ -157,6 +158,7 @@ function EffectsClient.Init()
 			Debris:AddItem(flash, 0.08)
 
 		elseif etype == "Blink" then
+			if not payload.startPosition or not payload.endPosition then return end
 			-- Start flash
 			local f1 = Instance.new("Part")
 			f1.Size = Vector3.new(3, 3, 3)
@@ -490,7 +492,11 @@ function EffectsClient.Init()
 			Debris:AddItem(ring, 0.5)
 
 		elseif etype == "Trail" then
-			CombatClient.RenderTrail(payload.startPosition, payload.endPosition, payload.color, payload.duration)
+			if payload.startPosition and payload.endPosition then
+				pcall(function()
+					CombatClient.RenderTrail(payload.startPosition, payload.endPosition, payload.color, payload.duration)
+				end)
+			end
 
 			-- === NEW EFFECTS BELOW ===
 
