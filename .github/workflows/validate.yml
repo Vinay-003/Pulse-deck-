@@ -16,10 +16,17 @@ concurrency:
 jobs:
   validate:
     runs-on: ubuntu-24.04
-    timeout-minutes: 15
+    timeout-minutes: 20
 
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name
+      - name: Install Rojo
+        run: cargo install rojo --version 7.4.4 --locked
+
+      - name: Build place
+        run: rojo build default.project.json -o PulseDeckArena.rbxlx
+
+      - name: Verify build output
+        run: test -s PulseDeckArena.rbxlx
