@@ -3,320 +3,181 @@ local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local PathfindingService = game:GetService("PathfindingService")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
-local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
 local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
-local AbilityConfig = require(sharedRoot:WaitForChild("AbilityConfig"))
 
-local AISystem = {}
-
-AISystem.Enabled = {}
-AISystem.HeroSystem = nil
-AISystem.MatchSystem = nil
-AISystem.CombatSystem = nil
-AISystem.AbilitySystem = nil
-AISystem.WaypointCache = {}
-AISystem.PathCache = {}
-AISystem.Difficulty = "Normal"
+local AISystem = {
+	Enabled = {},
+	Brains = {},
+	HeroSystem = nil,
+	MatchSystem = nil,
+	CombatSystem = nil,
+	AbilitySystem = nil,
+	Initialized = false,
+	Difficulty = "Normal",
+}
 
 local DIFFICULTY = {
-	Easy = {accuracyBonus = 0.15, reactionBonus = 0.0, abilityChanceMult = 0.5, ultChanceMult = 0.3, pathfindRecompute = 2},
-	Normal = {accuracyBonus = 0.0, reactionBonus = 0.0, abilityChanceMult = 1.0, ultChanceMult = 1.0, pathfindRecompute = 1.5},
-	Hard = {accuracyBonus = -0.1, reactionBonus = -0.15, abilityChanceMult = 1.3, ultChanceMult = 1.5, pathfindRecompute = 1},
+	Easy = {reaction = 0.65, aimError = 5.5, abilityChance = 0.15},
+	Normal = {reaction = 0.4, aimError = 3.0, abilityChance = 0.3},
+	Hard = {reaction = 0.25, aimError = 1.5, abilityChance = 0.45},
 }
 
-AISystem.AIProfiles = {
-	Flanker = {
-		aggressiveness = 0.8, preferCloseRange = true, strafeChance = 0.6,
-		abilityUsageChance = 0.5, retreatHealthThreshold = 0.3, preferredLane = "flank",
-		fireWhileMoving = true, accuracy = 0.7, reactionTime = 0.4,
-	},
-	Aggressive = {
-		aggressiveness = 0.9, preferCloseRange = true, strafeChance = 0.4,
-		abilityUsageChance = 0.5, retreatHealthThreshold = 0.2, preferredLane = "main",
-		fireWhileMoving = true, accuracy = 0.6, reactionTime = 0.3,
-	},
-	Frontline = {
-		aggressiveness = 0.6, preferCloseRange = false, strafeChance = 0.3,
-		abilityUsageChance = 0.4, retreatHealthThreshold = 0.2, preferredLane = "main",
-		fireWhileMoving = false, accuracy = 0.65, reactionTime = 0.5,
-	},
-	Backline = {
-		aggressiveness = 0.4, preferCloseRange = false, strafeChance = 0.2,
-		abilityUsageChance = 0.6, retreatHealthThreshold = 0.25, preferredLane = "main",
-		fireWhileMoving = false, accuracy = 0.8, reactionTime = 0.6,
-	},
-	Support = {
-		aggressiveness = 0.2, preferCloseRange = false, strafeChance = 0.3,
-		abilityUsageChance = 0.8, retreatHealthThreshold = 0.4, preferredLane = "main",
-		fireWhileMoving = false, accuracy = 0.6, reactionTime = 0.5,
-	},
-	Siege = {
-		aggressiveness = 0.5, preferCloseRange = false, strafeChance = 0.2,
-		abilityUsageChance = 0.7, retreatHealthThreshold = 0.25, preferredLane = "main",
-		fireWhileMoving = false, accuracy = 0.75, reactionTime = 0.7,
-	},
-	Assassin = {
-		aggressiveness = 0.9, preferCloseRange = true, strafeChance = 0.8,
-		abilityUsageChance = 0.7, retreatHealthThreshold = 0.2, preferredLane = "flank",
-		fireWhileMoving = true, accuracy = 0.5, reactionTime = 0.25,
-	},
-	Controller = {
-		aggressiveness = 0.4, preferCloseRange = false, strafeChance = 0.3,
-		abilityUsageChance = 0.6, retreatHealthThreshold = 0.3, preferredLane = "main",
-		fireWhileMoving = false, accuracy = 0.7, reactionTime = 0.6,
-	},
-	Defender = {
-		aggressiveness = 0.3, preferCloseRange = false, strafeChance = 0.15,
-		abilityUsageChance = 0.5, retreatHealthThreshold = 0.15, preferredLane = "main",
-		fireWhileMoving = false, accuracy = 0.65, reactionTime = 0.5,
-	},
-}
-
-local function getLanePoints(laneName)
-	if AISystem.WaypointCache[laneName] then
-		return AISystem.WaypointCache[laneName]
-	end
+local function worldFolder(name)
 	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
-	if not world then return {} end
-	local waypointsFolder = world:FindFirstChild("Waypoints")
-	if not waypointsFolder then return {} end
-	local laneFolder = waypointsFolder:FindFirstChild(laneName)
-	if not laneFolder then return {} end
-	local points = {}
-	for _, child in ipairs(laneFolder:GetChildren()) do
-		if child:IsA("BasePart") then
-			table.insert(points, child.Position)
-		end
-	end
-	table.sort(points, function(a, b) return a.X < b.X end)
-	AISystem.WaypointCache[laneName] = points
-	return points
+	return world and world:FindFirstChild(name)
 end
 
-local function reverseList(list)
-	local out = {}
-	for i = #list, 1, -1 do
-		table.insert(out, list[i])
-	end
-	return out
+local function lineOfSight(observer, target)
+	if not observer.Root or not target.Root then return false end
+	local origin = observer.Root.Position + Vector3.new(0, 1.5, 0)
+	local direction = target.Root.Position + Vector3.new(0, 1.2, 0) - origin
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.FilterDescendantsInstances = {observer.Model}
+	params.IgnoreWater = true
+	local result = workspace:Raycast(origin, direction, params)
+	if not result then return true end
+	return result.Instance and result.Instance:IsDescendantOf(target.Model)
 end
 
-local function getRandomPointInRadius(center, radius)
-	local angle = math.random() * math.pi * 2
-	local dist = math.random() * radius
-	return center + Vector3.new(math.cos(angle) * dist, 0, math.sin(angle) * dist)
-end
-
-local function getEnemiesInRadius(hero, radius)
-	local enemies = {}
-	for _, h in pairs(AISystem.HeroSystem.HeroesByGuid) do
-		if h.Alive and h.TeamId ~= hero.TeamId then
-			local d = (h.Root.Position - hero.Root.Position).Magnitude
-			if d <= radius then
-				table.insert(enemies, {hero = h, distance = d})
-			end
-		end
-	end
-	table.sort(enemies, function(a, b) return a.distance < b.distance end)
-	return enemies
-end
-
-local function getNearbyAllies(hero, radius)
-	local allies = {}
-	for _, h in pairs(AISystem.HeroSystem.HeroesByGuid) do
-		if h.Alive and h.TeamId == hero.TeamId and h ~= hero then
-			local d = (h.Root.Position - hero.Root.Position).Magnitude
-			if d <= radius then
-				table.insert(allies, h)
-			end
-		end
-	end
-	return allies
-end
-
-local function getNearestEnemyObjective(hero, range)
-	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
-	if not world then return nil end
-	local objectivesFolder = world:FindFirstChild("Objectives")
-	if not objectivesFolder then return nil end
-	local best = nil
-	local bestDist = math.huge
-	for _, model in ipairs(objectivesFolder:GetChildren()) do
-		if model:IsA("Model") and model.PrimaryPart then
-			local teamId = model:GetAttribute("ObjectiveTeam")
-			local destroyed = model:GetAttribute("Destroyed")
-			if teamId ~= hero.TeamId and not destroyed then
-				local d = (model.PrimaryPart.Position - hero.Root.Position).Magnitude
-				if d < bestDist and d <= range then
-					best = model
-					bestDist = d
-				end
-			end
+local function nearestObjective(hero)
+	local objectives = worldFolder("Objectives")
+	if not objectives then return nil end
+	local best, bestDistance = nil, math.huge
+	for _, model in ipairs(objectives:GetChildren()) do
+		if model:IsA("Model") and model.PrimaryPart and model:GetAttribute("Destroyed") ~= true and model:GetAttribute("ObjectiveTeam") ~= hero.TeamId then
+			local distance = (model.PrimaryPart.Position - hero.Root.Position).Magnitude
+			if distance < bestDistance then best, bestDistance = model.PrimaryPart, distance end
 		end
 	end
 	return best
 end
 
-local function getLowestHealthEnemy(hero, range)
-	local best = nil
-	local bestHealth = math.huge
-	for _, h in pairs(AISystem.HeroSystem.HeroesByGuid) do
-		if h.Alive and h.TeamId ~= hero.TeamId then
-			local d = (h.Root.Position - hero.Root.Position).Magnitude
-			if d <= range and h.Health < bestHealth then
-				best = h
-				bestHealth = h.Health
-			end
+local function nearestAlly(hero)
+	local best, bestDistance = nil, math.huge
+	for _, candidate in pairs(AISystem.HeroSystem.HeroesByGuid) do
+		if candidate ~= hero and candidate.Alive and candidate.TeamId == hero.TeamId and candidate.Root then
+			local distance = (candidate.Root.Position - hero.Root.Position).Magnitude
+			if distance < bestDistance then best, bestDistance = candidate, distance end
 		end
 	end
 	return best
 end
 
-local function findFleePosition(hero)
-	local nearestEnemy = nil
-	local nearestDist = math.huge
-	for _, h in pairs(AISystem.HeroSystem.HeroesByGuid) do
-		if h.Alive and h.TeamId ~= hero.TeamId then
-			local d = (h.Root.Position - hero.Root.Position).Magnitude
-			if d < nearestDist then
-				nearestDist = d
-				nearestEnemy = h
-			end
+local function threatScore(hero, target)
+	if not target.Alive or target.TeamId == hero.TeamId or not target.Root then return -math.huge end
+	local distance = (target.Root.Position - hero.Root.Position).Magnitude
+	local score = 1000 / math.max(8, distance)
+	local healthRatio = (target.Health or 0) / math.max(1, target.MaxHealth or 1)
+	score += (1 - healthRatio) * 20
+	if target.IsControlled then score += 8 end
+	if target.MarkedUntil and os.clock() < target.MarkedUntil then score += 12 end
+	if lineOfSight(hero, target) then score += 25 else score -= 15 end
+	return score
+end
+
+local function chooseTarget(hero, brain)
+	local best, bestScore = nil, -math.huge
+	for _, candidate in pairs(AISystem.HeroSystem.HeroesByGuid) do
+		local score = threatScore(hero, candidate)
+		if score > bestScore then best, bestScore = candidate, score end
+	end
+	if best then
+		brain.LastSeenTarget = best
+		brain.LastSeenPosition = best.Root.Position
+		brain.LastSeenAt = os.clock()
+	end
+	return best
+end
+
+local function moveTo(hero, brain, destination)
+	if not destination or not hero.Humanoid or not hero.Root then return end
+	if os.clock() - brain.LastPathAt < 0.8 and brain.MoveDestination and (brain.MoveDestination - destination).Magnitude < 6 then return end
+	brain.LastPathAt = os.clock()
+	brain.MoveDestination = destination
+	local distance = (destination - hero.Root.Position).Magnitude
+	if distance < 35 then
+		hero.Humanoid:MoveTo(destination)
+		return
+	end
+	local path = PathfindingService:CreatePath({AgentRadius = 2, AgentHeight = 5, AgentCanJump = true, WaypointSpacing = 8})
+	local success = pcall(function() path:ComputeAsync(hero.Root.Position, destination) end)
+	if not success or path.Status ~= Enum.PathStatus.Success then hero.Humanoid:MoveTo(destination) return end
+	local waypoints = path:GetWaypoints()
+	local waypoint = waypoints[math.min(2, #waypoints)]
+	if waypoint then
+		if waypoint.Action == Enum.PathWaypointAction.Jump then hero.Humanoid.Jump = true end
+		hero.Humanoid:MoveTo(waypoint.Position)
+	end
+end
+
+local function aimDirection(hero, target, profile)
+	local origin = hero.Root.Position + Vector3.new(0, 1.4, 0)
+	local targetPosition = target.Root.Position + Vector3.new(0, 1.2, 0)
+	local velocity = target.Root.AssemblyLinearVelocity or Vector3.zero
+	local weapon = WeaponConfig[hero.WeaponId] or {}
+	local distance = (targetPosition - origin).Magnitude
+	local leadTime = math.clamp(distance / (weapon.projectileSpeed or 700), 0, 0.35)
+	targetPosition += velocity * leadTime
+	local errorDegrees = profile.aimError
+	local yaw = math.rad((math.random() - 0.5) * errorDegrees)
+	local pitch = math.rad((math.random() - 0.5) * errorDegrees)
+	return (CFrame.lookAt(origin, targetPosition) * CFrame.Angles(pitch, yaw, 0)).LookVector
+end
+
+local function updateHero(hero, brain, dt)
+	if not hero.Alive or not hero.Root or not hero.Humanoid then return end
+	if AISystem.MatchSystem.State ~= "ActiveMatch" and AISystem.MatchSystem.State ~= "SuddenDeath" then return end
+	local profile = DIFFICULTY[AISystem.Difficulty] or DIFFICULTY.Normal
+	local target = chooseTarget(hero, brain)
+	local healthRatio = (hero.Health or 0) / math.max(1, hero.MaxHealth or 1)
+	if healthRatio < 0.28 then
+		local ally = nearestAlly(hero)
+		if ally then
+			local away = hero.Root.Position - (target and target.Root.Position or ally.Root.Position)
+			if away.Magnitude < 0.1 then away = Vector3.new(1, 0, 0) end
+			moveTo(hero, brain, ally.Root.Position + away.Unit * 10)
+		else
+			moveTo(hero, brain, hero.Root.Position - hero.Root.CFrame.LookVector * 18)
 		end
+		return
 	end
-	if nearestEnemy then
-		local fleeDir = (hero.Root.Position - nearestEnemy.Root.Position).Unit
-		local targetPos = hero.Root.Position + fleeDir * 20
-		targetPos = Vector3.new(
-			math.clamp(targetPos.X, -140, 140),
-			targetPos.Y,
-			math.clamp(targetPos.Z, -95, 95)
-		)
-		return targetPos
+	if not target then
+		local objective = nearestObjective(hero)
+		if objective then moveTo(hero, brain, objective.Position) end
+		return
 	end
-	local spawnPoints = (hero.TeamId == Config.TEAM_RED) and Config.MAP.RED_SPAWN_PADS or Config.MAP.BLUE_SPAWN_PADS
-	return spawnPoints[1]
-end
-
-local function computePath(hero, targetPos)
-	if not hero or not targetPos then return {} end
-	local key = hero.Guid .. "_" .. math.floor(targetPos.X) .. "_" .. math.floor(targetPos.Z)
-	if AISystem.PathCache[key] and os.clock() - AISystem.PathCache[key].time < (DIFFICULTY[AISystem.Difficulty].pathfindRecompute or 2) then
-		return AISystem.PathCache[key].points
+	local distance = (target.Root.Position - hero.Root.Position).Magnitude
+	local weapon = WeaponConfig[hero.WeaponId] or {}
+	local preferred = math.clamp((weapon.range or 250) * 0.35, 18, 90)
+	local visible = lineOfSight(hero, target)
+	if not visible then
+		if os.clock() - brain.LastSeenAt < 3 and brain.LastSeenPosition then moveTo(hero, brain, brain.LastSeenPosition)
+		else moveTo(hero, brain, target.Root.Position) end
+		return
 	end
-	local pathParams = {
-		AgentRadius = 2,
-		AgentHeight = 5,
-		AgentCanJump = true,
-		AgentMaxSlope = 45,
-		WaypointSpacing = 4,
-		Costs = {Water = 10},
-	}
-	local path = PathfindingService:CreatePath(pathParams)
-	local ok = pcall(function()
-		path:ComputeAsync(hero.Root.Position, targetPos)
-	end)
-	if not ok then return {} end
-	local points = path:GetWaypoints()
-	AISystem.PathCache[key] = {points = points, time = os.clock()}
-	if #AISystem.PathCache > 200 then AISystem.PathCache = {} end
-	return points
-end
-
-local function moveToPosition(hero, targetPos, profile, allowPathfinding)
-	if not hero or not hero.Humanoid then return end
-	local dist = (hero.Root.Position - targetPos).Magnitude
-	if dist > 10 and allowPathfinding then
-		local path = computePath(hero, targetPos)
-		if #path > 1 then
-			hero.AIPath = path
-			hero.AIPathIndex = 2
-			hero.AIPathGoal = targetPos
-			return
-		end
+	if distance > preferred * 1.25 then
+		moveTo(hero, brain, target.Root.Position)
+	elseif distance < preferred * 0.45 then
+		local retreat = (hero.Root.Position - target.Root.Position)
+		if retreat.Magnitude > 0.1 then moveTo(hero, brain, hero.Root.Position + retreat.Unit * 14) end
+	else
+		local side = hero.Root.CFrame.RightVector * (brain.StrafeDirection or 1) * 8
+		moveTo(hero, brain, hero.Root.Position + side)
+		if math.random() < 0.08 then brain.StrafeDirection = -(brain.StrafeDirection or 1) end
 	end
-	hero.AIPath = nil
-	hero.Humanoid:MoveTo(targetPos)
-end
-
-local function followPath(hero)
-	if not hero.AIPath or #hero.AIPath == 0 then
-		if hero.AIPathGoal then
-			hero.Humanoid:MoveTo(hero.AIPathGoal)
-		end
-		return false
+	if os.clock() >= brain.NextFireAt then
+		brain.NextFireAt = os.clock() + math.max(profile.reaction, weapon.fireInterval or 0.1)
+		AISystem.CombatSystem.FireWeapon(hero, aimDirection(hero, target, profile))
 	end
-	local idx = hero.AIPathIndex or 2
-	if idx > #hero.AIPath then
-		hero.AIPath = nil
-		return false
+	if AISystem.AbilitySystem and os.clock() >= brain.NextAbilityAt and math.random() < profile.abilityChance then
+		brain.NextAbilityAt = os.clock() + 7 + math.random() * 5
+		AISystem.AbilitySystem.UseAbility(hero, {direction = (target.Root.Position - hero.Root.Position).Unit})
 	end
-	local waypoint = hero.AIPath[idx]
-	hero.Humanoid:MoveTo(waypoint.Position)
-	if (hero.Root.Position - waypoint.Position).Magnitude < 4 then
-		hero.AIPathIndex = idx + 1
+	if AISystem.AbilitySystem and (hero.UltimateCharge or 0) >= (hero.UltimateChargeMax or 100) and distance < preferred then
+		AISystem.AbilitySystem.UseUltimate(hero)
 	end
-	if waypoint.Action == Enum.PathWaypointAction.Jump then
-		hero.Humanoid.Jump = true
-	end
-	return true
-end
-
-local function findCoverPosition(hero, enemy)
-	local enemyPos = enemy.Root.Position
-	local heroPos = hero.Root.Position
-	local dirAway = (heroPos - enemyPos).Unit
-	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
-	if not world then return nil end
-	local mapFolder = world:FindFirstChild("Map")
-	if not mapFolder then return nil end
-	local bestCover = nil
-	local bestCoverScore = -1
-	for _, part in ipairs(mapFolder:GetDescendants()) do
-		if part:IsA("BasePart") and part.Name:lower():find("cover") then
-			local coverPos = part.Position
-			local distToCover = (heroPos - coverPos).Magnitude
-			local distFromEnemy = (enemyPos - coverPos).Magnitude
-			if distToCover < 30 and distFromEnemy < 20 then
-				local toCover = (coverPos - heroPos).Unit
-				local dot = toCover:Dot(dirAway)
-				if dot > 0.3 then
-					local score = distFromEnemy - distToCover
-					if score > bestCoverScore then
-						bestCoverScore = score
-						bestCover = coverPos + Vector3.new(0, 2, 0)
-					end
-				end
-			end
-		end
-	end
-	return bestCover
-end
-
-local function isBehindCover(hero, enemy)
-	local direction = (enemy.Root.Position - hero.Root.Position).Unit
-	local rayParams = RaycastParams.new()
-	rayParams.FilterType = Enum.RaycastFilterType.Exclude
-	rayParams.FilterDescendantsInstances = {hero.Model, enemy.Model}
-	local ray = workspace:Raycast(hero.Root.Position + Vector3.new(0, 1, 0), direction * 50, rayParams)
-	if ray and ray.Instance and ray.Instance.Parent and ray.Instance.Parent.Name == "Map" then
-		return true, ray.Position
-	end
-	return false, nil
-end
-
-local function shouldUseAbility(hero, profile)
-	if not AISystem.AbilitySystem then return false end
-	if os.clock() < hero.AbilityReadyAt then return false end
-	local prof = AISystem.AIProfiles[profile]
-	local chance = (prof and prof.abilityUsageChance or 0.4) * DIFFICULTY[AISystem.Difficulty].abilityChanceMult
-	return math.random() < chance
-end
-
-local function shouldUseUltimate(hero)
-	if hero.UltimateCharge < hero.UltimateChargeMax then return false end
-	return math.random() < 0.3 * DIFFICULTY[AISystem.Difficulty].ultChanceMult
 end
 
 function AISystem.Init(heroSystem, matchSystem, combatSystem, abilitySystem)
@@ -324,402 +185,52 @@ function AISystem.Init(heroSystem, matchSystem, combatSystem, abilitySystem)
 	AISystem.MatchSystem = matchSystem
 	AISystem.CombatSystem = combatSystem
 	AISystem.AbilitySystem = abilitySystem
-
-	RunService.Heartbeat:Connect(function()
-		if not AISystem.MatchSystem then return end
-		local state = AISystem.MatchSystem.State
-		if state ~= "ActiveMatch" and state ~= "SuddenDeath" then return end
-
-		for hero, enabled in pairs(AISystem.Enabled) do
-			if enabled and hero.Alive and not hero.IsControlled then
-				if not hero.AIThinkNextTick or os.clock() >= hero.AIThinkNextTick then
-					local profile = AISystem.AIProfiles[HeroConfig[hero.HeroId].aiProfile]
-					local reaction = (profile and profile.reactionTime or 0.5) - DIFFICULTY[AISystem.Difficulty].reactionBonus
-					hero.AIThinkNextTick = os.clock() + math.max(0.15, reaction)
-					AISystem.Think(hero)
-				end
-			end
-		end
-
-		for _, hero in pairs(AISystem.HeroSystem.HeroesByGuid) do
-			if not hero.IsControlled and hero.Alive then
-				hero.LastKnownPosition = hero.Root.Position
-				if hero.ActiveEffects and hero.ActiveEffects.overcharge then
-					local hd = HeroConfig[hero.HeroId]
-					hero.Humanoid.WalkSpeed = hd.walkSpeed * hero.ActiveEffects.overcharge.SpeedMultiplier
-				elseif hero.ActiveEffects and hero.ActiveEffects.fortify then
-					hero.Humanoid.WalkSpeed = 0.01
-				elseif hero.AISpeedMult then
-					local hd = HeroConfig[hero.HeroId]
-					hero.Humanoid.WalkSpeed = hd.walkSpeed * hero.AISpeedMult
-				end
-				if not followPath(hero) then
-					if hero.AIPathGoal then
-						local distToGoal = (hero.Root.Position - hero.AIPathGoal).Magnitude
-						if distToGoal < 5 then
-							hero.AIPathGoal = nil
-						end
-					end
+	if AISystem.Initialized then return end
+	AISystem.Initialized = true
+	local accumulator = 0
+	RunService.Heartbeat:Connect(function(dt)
+		accumulator += dt
+		if accumulator < 0.1 then return end
+		local step = accumulator
+		accumulator = 0
+		local now = os.clock()
+		for guid, enabled in pairs(AISystem.Enabled) do
+			if enabled then
+				local hero = AISystem.HeroSystem.HeroesByGuid[guid]
+				local brain = AISystem.Brains[guid]
+				if hero and brain and now >= brain.NextThinkAt then
+					brain.NextThinkAt = now + 0.1 + (brain.Offset or 0)
+					updateHero(hero, brain, step)
+				elseif not hero then
+					AISystem.Enabled[guid] = nil
+					AISystem.Brains[guid] = nil
 				end
 			end
 		end
 	end)
-
-	AISystem.LastHitMemory = {}
-	AISystem.Difficulty = "Normal"
 end
 
 function AISystem.EnableHeroAI(hero, enabled)
-	AISystem.Enabled[hero] = enabled
+	if not hero or not hero.Guid then return end
+	AISystem.Enabled[hero.Guid] = enabled == true
 	if enabled then
-		hero.AILastThink = 0
-		hero.AILane = nil
-		hero.AIWaypointIndex = nil
-		hero.AILastPos = nil
-		hero.AIStuckCounter = 0
-		hero.AIAttackTarget = nil
-		hero.AILastSwitchCover = 0
-		hero.AIStrafeDir = nil
-		hero.AIPath = nil
-		hero.AIPathGoal = nil
-		hero.AIThinkNextTick = 0
-		-- Random walk speed variation per bot (80%-120% of base)
-		local hd = HeroConfig[hero.HeroId]
-		if hd and hero.Humanoid then
-			hero.AISpeedMult = 0.85 + math.random() * 0.3
-			hero.Humanoid.WalkSpeed = hd.walkSpeed * hero.AISpeedMult
-		end
+		AISystem.Brains[hero.Guid] = AISystem.Brains[hero.Guid] or {
+			NextThinkAt = os.clock() + math.random() * 0.2,
+			NextFireAt = os.clock() + 0.5,
+			NextAbilityAt = os.clock() + 3 + math.random() * 4,
+			LastPathAt = 0,
+			LastSeenAt = 0,
+			StrafeDirection = math.random() < 0.5 and -1 or 1,
+			Offset = math.random() * 0.04,
+		}
+	else
+		AISystem.Brains[hero.Guid] = nil
 	end
 end
 
 function AISystem.Clear()
 	AISystem.Enabled = {}
-	AISystem.WaypointCache = {}
-	AISystem.PathCache = {}
-end
-
-function AISystem.SetDifficulty(diff)
-	if DIFFICULTY[diff] then AISystem.Difficulty = diff end
-end
-
-function AISystem.FindNearestEnemy(hero, range)
-	local best = nil
-	local bestDist = math.huge
-	for _, h in pairs(AISystem.HeroSystem.HeroesByGuid) do
-		if h.TeamId ~= hero.TeamId and h.Alive and not h.IsStealthed then
-			local d = (h.Root.Position - hero.Root.Position).Magnitude
-			if d < bestDist and d <= range then
-				best = h
-				bestDist = d
-			end
-		end
-	end
-	return best, bestDist
-end
-
-function AISystem.FindNearestAlly(hero)
-	local best = nil
-	local bestDist = math.huge
-	for _, h in pairs(AISystem.HeroSystem.HeroesByGuid) do
-		if h.TeamId == hero.TeamId and h.Alive and h ~= hero then
-			local d = (h.Root.Position - hero.Root.Position).Magnitude
-			if d < bestDist then
-				best = h
-				bestDist = d
-			end
-		end
-	end
-	return best, bestDist
-end
-
-function AISystem.GetLaneForHero(hero)
-	if hero.AILane then return hero.AILane end
-	local profile = HeroConfig[hero.HeroId].aiProfile
-	local prof = AISystem.AIProfiles[profile]
-	if prof and prof.preferredLane == "flank" then
-		hero.AILane = math.random() > 0.5 and "Lane_Upper" or "Lane_Lower"
-	else
-		hero.AILane = "Lane_Main"
-	end
-	return hero.AILane
-end
-
-function AISystem.AdvanceLane(hero)
-	local laneName = AISystem.GetLaneForHero(hero)
-	local points = getLanePoints(laneName)
-	if #points == 0 then return end
-	local ordered = points
-	if hero.TeamId == Config.TEAM_BLUE then
-		ordered = reverseList(points)
-	end
-	if not hero.AIWaypointIndex then
-		hero.AIWaypointIndex = 1
-	end
-	local idx = hero.AIWaypointIndex
-	local target = ordered[idx]
-
-	-- Add wobble offset for natural movement
-	local wobble = Vector3.new(
-		math.sin(tick() * 0.7 + hero.Guid:byte(1)) * 2,
-		0,
-		math.cos(tick() * 0.5 + hero.Guid:byte(2)) * 2
-	)
-
-	-- Random brief pause (look around)
-	if math.random() < 0.01 and idx < #ordered then
-		hero.Humanoid:MoveTo(hero.Root.Position)
-		hero.AILookTimer = (hero.AILookTimer or 0) + 1
-		if hero.AILookTimer > 3 then
-			hero.AILookTimer = 0
-			moveToPosition(hero, target + wobble, nil, true)
-		end
-		return
-	end
-	hero.AILookTimer = 0
-
-	moveToPosition(hero, target + wobble, nil, true)
-	if (hero.Root.Position - target).Magnitude < 6 then
-		hero.AIWaypointIndex = math.clamp(idx + 1, 1, #ordered)
-	end
-end
-
-function AISystem.RetreatToBase(hero)
-	local points = (hero.TeamId == Config.TEAM_RED) and Config.MAP.RED_SPAWN_PADS or Config.MAP.BLUE_SPAWN_PADS
-	local nearest = points[1]
-	local best = math.huge
-	for _, pos in ipairs(points) do
-		local d = (hero.Root.Position - pos).Magnitude
-		if d < best then
-			best = d
-			nearest = pos
-		end
-	end
-	local retreatPos = nearest + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
-	moveToPosition(hero, retreatPos, nil, true)
-end
-
-function AISystem.SeekCover(hero, enemy)
-	local coverPos = findCoverPosition(hero, enemy)
-	if coverPos then
-		moveToPosition(hero, coverPos, nil, true)
-		return true
-	end
-	return false
-end
-
-function AISystem.StrafeCombat(hero, enemy)
-	local dirToEnemy = (hero.Root.Position - enemy.Root.Position).Unit
-	local perp = Vector3.new(-dirToEnemy.Z, 0, dirToEnemy.X)
-
-	-- Random strafe pattern switch
-	if not hero.AIStrafeDir or math.random() < 0.08 then
-		hero.AIStrafeDir = math.random() > 0.5 and 1 or -1
-		hero.AIStrafeMode = math.random(1, 3) -- 1=linear, 2=circular, 3=diagonal
-	end
-
-	local strafeTarget
-	if hero.AIStrafeMode == 2 then
-		-- Circular strafe around enemy
-		local angle = (hero.AIStrafeDir * 1.5) + math.sin(tick() * 2 + hero.Guid:byte(1)) * 0.5
-		local around = CFrame.new(hero.Root.Position, enemy.Root.Position)
-		around = around * CFrame.Angles(0, angle, 0) * CFrame.new(0, 0, 6)
-		strafeTarget = around.Position
-	elseif hero.AIStrafeMode == 3 then
-		-- Diagonal strafe (forward + side)
-		local diag = (dirToEnemy * hero.AIStrafeDir * -0.5 + perp * hero.AIStrafeDir).Unit
-		strafeTarget = hero.Root.Position + diag * 8 + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
-	else
-		-- Linear strafe
-		strafeTarget = hero.Root.Position + perp * hero.AIStrafeDir * 8 + Vector3.new(math.random(-2, 2), 0, math.random(-2, 2))
-	end
-
-	-- Random brief pause (like a real player hesitating)
-	if math.random() < 0.03 and (hero.Root.Position - (hero.AILastStrafePos or hero.Root.Position)).Magnitude < 1 then
-		hero.Humanoid:MoveTo(hero.Root.Position)
-		return
-	end
-	hero.AILastStrafePos = strafeTarget
-
-	strafeTarget = Vector3.new(
-		math.clamp(strafeTarget.X, -135, 135),
-		strafeTarget.Y,
-		math.clamp(strafeTarget.Z, -92, 92)
-	)
-	hero.Humanoid:MoveTo(strafeTarget)
-end
-
-function AISystem.Think(hero)
-	if not hero.Alive then return end
-
-	local heroDef = HeroConfig[hero.HeroId]
-	local profile = heroDef.aiProfile
-	local aiProfile = AISystem.AIProfiles[profile]
-	local diff = DIFFICULTY[AISystem.Difficulty]
-	local aggressiveness = aiProfile and aiProfile.aggressiveness or 0.5
-	local accuracy = (aiProfile and aiProfile.accuracy or 0.5) + (diff.accuracyBonus or 0)
-
-	local weapon = WeaponConfig[hero.WeaponId]
-	local range = weapon and weapon.range or 100
-
-	local healthPercent = hero.Health / hero.MaxHealth
-
-	if healthPercent < (aiProfile and aiProfile.retreatHealthThreshold or 0.25) then
-		if shouldUseAbility(hero, profile) and hero.AbilityId then
-			local cfg = AbilityConfig[hero.AbilityId]
-			if cfg and (cfg.kind == "DefensiveDeployable" or cfg.kind == "DefensiveSelf") then
-				AISystem.AbilitySystem.UseAbility(hero, {direction = hero.Root.CFrame.LookVector})
-			end
-		end
-		if math.random() < aggressiveness * 0.5 and aiProfile and aiProfile.strafeChance > 0.5 then
-			local nearEnemy = AISystem.FindNearestEnemy(hero, 100)
-			if nearEnemy then AISystem.StrafeCombat(hero, nearEnemy) end
-		else
-			AISystem.RetreatToBase(hero)
-		end
-		return
-	end
-
-	if profile == "Support" then
-		local allies = getNearbyAllies(hero, 25)
-		local needsHeal = false
-		for _, ally in ipairs(allies) do
-			if ally.Health / ally.MaxHealth < 0.6 then needsHeal = true; break end
-		end
-		if needsHeal and shouldUseAbility(hero, profile) then
-			AISystem.AbilitySystem.UseAbility(hero, {direction = hero.Root.CFrame.LookVector})
-			hero.Humanoid:MoveTo(hero.Root.Position)
-			return
-		end
-		local nearestLowAlly = nil
-		local bestDist = math.huge
-		for _, ally in ipairs(allies) do
-			if ally.Health / ally.MaxHealth < 0.75 then
-				local d = (ally.Root.Position - hero.Root.Position).Magnitude
-				if d < bestDist then bestDist = d; nearestLowAlly = ally end
-			end
-		end
-		if nearestLowAlly and bestDist > 8 then
-			moveToPosition(hero, nearestLowAlly.Root.Position + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3)), aiProfile, true)
-			return
-		end
-	end
-
-	if shouldUseUltimate(hero) then
-		local nearestEnemy = AISystem.FindNearestEnemy(hero, range)
-		if nearestEnemy then AISystem.AbilitySystem.UseUltimate(hero) end
-	end
-
-	if shouldUseAbility(hero, profile) then
-		local nearestEnemy = AISystem.FindNearestEnemy(hero, range)
-		if nearestEnemy and hero.AbilityId then
-			local cfg = AbilityConfig[hero.AbilityId]
-			if cfg then
-				if cfg.kind == "Teleport" then
-					local dir = (hero.Root.Position - nearestEnemy.Root.Position).Unit
-					AISystem.AbilitySystem.UseAbility(hero, {direction = dir})
-				elseif cfg.kind == "Mobility" and aiProfile and aiProfile.preferCloseRange then
-					local dist = (hero.Root.Position - nearestEnemy.Root.Position).Magnitude
-					if dist > 15 then
-						AISystem.AbilitySystem.UseAbility(hero, {direction = (nearestEnemy.Root.Position - hero.Root.Position).Unit})
-					end
-				elseif cfg.kind == "AreaBurst" then
-					local enemies = getEnemiesInRadius(hero, 15)
-					if #enemies >= 2 then
-						AISystem.AbilitySystem.UseAbility(hero, {direction = hero.Root.CFrame.LookVector})
-					end
-				elseif cfg.kind == "DefensiveDeployable" or cfg.kind == "DefensiveSelf" then
-					if healthPercent < 0.5 then
-						AISystem.AbilitySystem.UseAbility(hero, {direction = hero.Root.CFrame.LookVector})
-					end
-				else
-					AISystem.AbilitySystem.UseAbility(hero, {direction = (nearestEnemy.Root.Position - hero.Root.Position).Unit})
-				end
-			end
-		elseif hero.AbilityId and math.random() < 0.2 then
-			local objective = getNearestEnemyObjective(hero, 50)
-			if objective then
-				AISystem.AbilitySystem.UseAbility(hero, {direction = hero.Root.CFrame.LookVector})
-			end
-		end
-	end
-
-	local target, targetDist = AISystem.FindNearestEnemy(hero, range * 1.2)
-
-	if target then
-		local hasCover, coverPoint = isBehindCover(hero, target)
-
-		if targetDist > (range * 0.8) then
-			-- Approaching enemy: use varied movement
-			if aiProfile and aiProfile.preferCloseRange then
-				-- Move toward enemy but not in straight line
-				local offset = Vector3.new(math.sin(tick() * 1.5 + hero.Guid:byte(1)) * 4, 0, math.cos(tick() * 1.2 + hero.Guid:byte(2)) * 4)
-				local moveTarget = target.Root.Position + offset
-				hero.Humanoid:MoveTo(moveTarget)
-			else
-				-- Sit and hold position with slight adjustment
-				if math.random() < 0.85 then
-					hero.Humanoid:MoveTo(hero.Root.Position + Vector3.new(math.sin(tick()) * 1, 0, math.cos(tick()) * 1))
-				end
-			end
-		elseif targetDist < 8 and aiProfile and aiProfile.preferCloseRange then
-			AISystem.StrafeCombat(hero, target)
-		elseif hasCover and targetDist > 10 then
-			-- Peek-a-boo behavior: pop from cover, fire, go back
-			if math.random() < 0.15 and coverPoint then
-				moveToPosition(hero, coverPoint, aiProfile, true)
-			elseif math.random() < 0.3 then
-				-- Peek out and fire
-				local peekPos = target.Root.Position + (hero.Root.Position - target.Root.Position).Unit * 12
-				moveToPosition(hero, peekPos, aiProfile, false)
-			else
-				AISystem.StrafeCombat(hero, target)
-			end
-		elseif math.random() < (aiProfile and aiProfile.strafeChance or 0.3) and targetDist < 30 then
-			AISystem.StrafeCombat(hero, target)
-		else
-			-- Small random jitter instead of standing still
-			local jitter = Vector3.new(math.sin(tick() * 3) * 0.5, 0, math.cos(tick() * 2.5) * 0.5)
-			hero.Humanoid:MoveTo(hero.Root.Position + jitter)
-		end
-
-		local aimDir = (target.Root.Position - hero.Root.Position).Unit
-		local aimSpread = Vector3.new(
-			(math.random() - 0.5) * (1 - accuracy) * 4,
-			(math.random() - 0.5) * (1 - accuracy) * 4,
-			(math.random() - 0.5) * (1 - accuracy) * 4
-		)
-		local fireDir = (aimDir + aimSpread).Unit
-		AISystem.CombatSystem.FireWeapon(hero, fireDir)
-		hero.AIAttackTarget = target.Guid
-	else
-		hero.AIAttackTarget = nil
-		local objective = getNearestEnemyObjective(hero, 80)
-		if objective and math.random() < aggressiveness then
-			local objectivePos = objective.PrimaryPart.Position
-			local targetPos = objectivePos + Vector3.new(math.random(-5, 5), 0, math.random(-5, 5))
-			moveToPosition(hero, targetPos, aiProfile, true)
-			local dist = (hero.Root.Position - objectivePos).Magnitude
-			if dist < range then
-				local dir = (objectivePos - hero.Root.Position).Unit
-				AISystem.CombatSystem.FireWeapon(hero, dir)
-			end
-		else
-			AISystem.AdvanceLane(hero)
-		end
-	end
-
-	if profile == "Defender" or (profile == "Frontline" and math.random() < 0.3) then
-		local myGens = (hero.TeamId == Config.TEAM_RED) and Config.MAP.RED_GENERATORS or Config.MAP.BLUE_GENERATORS
-		if myGens then
-			for _, genPos in ipairs(myGens) do
-				local dist = (hero.Root.Position - genPos).Magnitude
-				if dist > 20 and dist < 40 and math.random() < 0.3 then
-					moveToPosition(hero, genPos + Vector3.new(math.random(-3, 3), 0, math.random(-3, 3)), aiProfile, true)
-					break
-				end
-			end
-		end
-	end
+	AISystem.Brains = {}
 end
 
 return AISystem
