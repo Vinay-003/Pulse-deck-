@@ -1,25 +1,36 @@
-
 local Players = game:GetService("Players")
 local RunService = game:GetService("RunService")
-local Lighting = game:GetService("Lighting")
 local UserInputService = game:GetService("UserInputService")
 
 local ClientCore = require(script.Parent:WaitForChild("ClientCore"))
+local SettingsClient = require(script.Parent:WaitForChild("SettingsClient"))
 
 local CameraClient = {}
 
 CameraClient.Mode = "TPS"
-CameraClient.BaseZoom = nil
+CameraClient.BaseZoom = 8
 CameraClient.CameraEffects = {}
-
 CameraClient.Spectating = false
 CameraClient.SpectateTarget = nil
 CameraClient.SpectateIndex = 1
 CameraClient.SpectateMode = "ThirdPerson"
+CameraClient.Yaw = 0
+CameraClient.Pitch = -8
+CameraClient.ShakeIntensity = 0
+CameraClient.ShakeDuration = 0
+CameraClient.ShakeElapsed = 0
+
+local function getLookVector(yawDegrees, pitchDegrees)
+	local yaw = math.rad(yawDegrees)
+	local pitch = math.rad(pitchDegrees)
+	local horizontal = math.cos(pitch)
+	return Vector3.new(-math.sin(yaw) * horizontal, -math.sin(pitch), -math.cos(yaw) * horizontal).Unit
+end
 
 function CameraClient.EnterSpectate()
+	if CameraClient.Spectating then return end
 	CameraClient.Spectating = true
-	CameraClient.SpectateIndex = 1
+	CameraClient.SpectateIndex = 0
 	CameraClient.SpectateMode = "ThirdPerson"
 	CameraClient.FindNextSpectateTarget()
 end
@@ -30,54 +41,65 @@ function CameraClient.ExitSpectate()
 end
 
 function CameraClient.FindNextSpectateTarget()
-	local heroes = ClientCore.State.heroes or {}
 	local aliveHeroes = {}
-	for _, h in pairs(heroes) do
-		if h.teamId == ClientCore.State.teamId and h.alive then
-			table.insert(aliveHeroes, h)
-		end
+	for _, hero in pairs(ClientCore.State.heroes or {}) do
+		if hero.teamId == ClientCore.State.teamId and hero.alive then table.insert(aliveHeroes, hero) end
 	end
 	if #aliveHeroes == 0 then
 		CameraClient.SpectateTarget = nil
 		return
 	end
 	CameraClient.SpectateIndex = (CameraClient.SpectateIndex % #aliveHeroes) + 1
-	local target = aliveHeroes[CameraClient.SpectateIndex]
-	CameraClient.SpectateTarget = target
+	CameraClient.SpectateTarget = aliveHeroes[CameraClient.SpectateIndex]
 end
 
 function CameraClient.ToggleSpectateMode()
-	if CameraClient.SpectateMode == "ThirdPerson" then
-		CameraClient.SpectateMode = "FirstPerson"
-	else
-		CameraClient.SpectateMode = "ThirdPerson"
-	end
+	CameraClient.SpectateMode = CameraClient.SpectateMode == "ThirdPerson" and "FirstPerson" or "ThirdPerson"
 end
 
--- Camera shake state
-CameraClient.ShakeIntensity = 0
-CameraClient.ShakeDuration = 0
-CameraClient.ShakeTime = 0
-
 function CameraClient.ToggleMode()
-	CameraClient.Mode = (CameraClient.Mode == "TPS") and "FPS" or "TPS"
+	CameraClient.Mode = CameraClient.Mode == "TPS" and "FPS" or "TPS"
 end
 
 function CameraClient.AddShake(intensity, duration)
-	if intensity > CameraClient.ShakeIntensity then
-		CameraClient.ShakeIntensity = intensity
-		CameraClient.ShakeDuration = duration
-		CameraClient.ShakeTime = 0
-	elseif os.clock() - CameraClient.ShakeTime < CameraClient.ShakeDuration then
-		CameraClient.ShakeTime = os.clock()
-	end
+	if not SettingsClient.CameraShake then return end
+	CameraClient.ShakeIntensity = math.max(CameraClient.ShakeIntensity, intensity or 0)
+	CameraClient.ShakeDuration = math.max(CameraClient.ShakeDuration, duration or 0)
+	CameraClient.ShakeElapsed = 0
 end
 
 function CameraClient.ApplyEffect(effectName, intensity, duration)
-	CameraClient.CameraEffects[effectName] = {
-		intensity = intensity or 1,
-		expireAt = os.clock() + (duration or 1),
-	}
+	CameraClient.CameraEffects[effectName] = {intensity = intensity or 1, expireAt = os.clock() + (duration or 1)}
+end
+
+local function updateSpectatorCamera(camera, deltaTime)
+	UserInputService.MouseBehavior = Enum.MouseBehavior.Default
+	UserInputService.MouseIconEnabled = true
+	local target = CameraClient.SpectateTarget
+	if target then
+		local targetPosition = target.position or target.rootPosition or Vector3.new(0, 5, 0)
+		local lookVector = getLookVector(CameraClient.Yaw, CameraClient.Pitch)
+		if CameraClient.SpectateMode == "FirstPerson" then
+			local cameraPosition = targetPosition + Vector3.new(0, 1.6, 0)
+			camera.CFrame = CFrame.new(cameraPosition, cameraPosition + lookVector * 100)
+		else
+			local desired = targetPosition - lookVector * 9 + Vector3.new(0, 3, 0)
+			camera.CFrame = CFrame.new(desired, targetPosition + Vector3.new(0, 1.5, 0))
+		end
+		return
+	end
+	local direction = Vector3.new((UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0), (UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0), (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0))
+	if direction.Magnitude > 0 then camera.CFrame = camera.CFrame + direction.Unit * 30 * deltaTime end
+end
+
+local function resolveCameraCollision(character, origin, desired)
+	local parameters = RaycastParams.new()
+	parameters.FilterType = Enum.RaycastFilterType.Exclude
+	parameters.FilterDescendantsInstances = {character}
+	parameters.IgnoreWater = true
+	local cast = workspace:Raycast(origin, desired - origin, parameters)
+	if cast then return cast.Position + cast.Normal * 0.35 end
+	return desired
 end
 
 function CameraClient.Init()
@@ -85,136 +107,76 @@ function CameraClient.Init()
 	if not camera then return end
 	camera.CameraType = Enum.CameraType.Scriptable
 
-	CameraClient.BaseZoom = 8
-	CameraClient.Yaw = 0
-	CameraClient.Pitch = -15
+	RunService.RenderStepped:Connect(function(deltaTime)
+		local matchState = ClientCore.State.matchState
+		local inGameplay = matchState == "ActiveMatch" or matchState == "SuddenDeath" or matchState == "MatchCountdown"
+		if CameraClient.Spectating or not inGameplay then UserInputService.MouseBehavior = Enum.MouseBehavior.Default else UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter end
+		UserInputService.MouseIconEnabled = not inGameplay or CameraClient.Spectating
 
-	local aimPart = Instance.new("Part")
-	aimPart.Name = "CameraAimHelper"
-	aimPart.Size = Vector3.new(0.1, 0.1, 0.1)
-	aimPart.Transparency = 1
-	aimPart.Anchored = true
-	aimPart.CanCollide = false
-	aimPart.Parent = workspace
-
-	RunService.RenderStepped:Connect(function(dt)
-		-- Mouse: free in menus, locked center (with visible icon) during gameplay
-		local ms = ClientCore.State.matchState
-		if CameraClient.Spectating or (ms ~= "ActiveMatch" and ms ~= "SuddenDeath" and ms ~= "MatchCountdown") then
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-		else
-			UserInputService.MouseBehavior = Enum.MouseBehavior.LockCenter
-		end
-		UserInputService.MouseIconEnabled = true
-
-		-- Spectator camera
 		if CameraClient.Spectating then
-			UserInputService.MouseBehavior = Enum.MouseBehavior.Default
-			UserInputService.MouseIconEnabled = true
-			if CameraClient.SpectateTarget then
-				local targetPos = CameraClient.SpectateTarget.position or CameraClient.SpectateTarget.rootPosition or Vector3.new(0, 5, 0)
-				if CameraClient.SpectateMode == "FirstPerson" then
-					camera.CFrame = CFrame.new(targetPos + Vector3.new(0, 1.5, 0), targetPos + (workspace.CurrentCamera and workspace.CurrentCamera.CFrame.LookVector * 10 or Vector3.new(0, 0, -10)))
-				else
-					local offset = Vector3.new(math.sin(tick() * 0.5) * 6, 4, math.cos(tick() * 0.5) * 6)
-					camera.CFrame = CFrame.new(targetPos + offset, targetPos)
-				end
-			else
-				local speed = 30
-				local dir = Vector3.new(
-					(UserInputService:IsKeyDown(Enum.KeyCode.D) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.A) and 1 or 0),
-					(UserInputService:IsKeyDown(Enum.KeyCode.Space) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) and 1 or 0),
-					(UserInputService:IsKeyDown(Enum.KeyCode.W) and 1 or 0) - (UserInputService:IsKeyDown(Enum.KeyCode.S) and 1 or 0)
-				)
-				if dir.Magnitude > 0 then
-					camera.CFrame = camera.CFrame + dir.Unit * speed * dt
-				end
-			end
+			updateSpectatorCamera(camera, deltaTime)
 			return
 		end
 
 		local character = Players.LocalPlayer.Character
 		if not character then return end
 		local root = character:FindFirstChild("HumanoidRootPart")
-		if not root or not root:IsA("BasePart") then return end
-
-		-- Mouse delta rotates camera (yaw + pitch)
-		local mouseDelta = UserInputService:GetMouseDelta()
-		local sensitivity = 0.002
-		CameraClient.Yaw = CameraClient.Yaw + mouseDelta.X * sensitivity
-		CameraClient.Pitch = math.clamp(CameraClient.Pitch + mouseDelta.Y * sensitivity, -80, 80)
-
-		-- Player movement relative to camera yaw
 		local humanoid = character:FindFirstChildOfClass("Humanoid")
-		if humanoid and humanoid.Health > 0 then
-			local yaw = CameraClient.Yaw
-			local camForward = Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
-			local camRight = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
+		if not root or not root:IsA("BasePart") or not humanoid then return end
 
-			local moveDir = Vector3.new(0, 0, 0)
-			if UserInputService:IsKeyDown(Enum.KeyCode.W) then moveDir = moveDir + camForward end
-			if UserInputService:IsKeyDown(Enum.KeyCode.S) then moveDir = moveDir - camForward end
-			if UserInputService:IsKeyDown(Enum.KeyCode.D) then moveDir = moveDir + camRight end
-			if UserInputService:IsKeyDown(Enum.KeyCode.A) then moveDir = moveDir - camRight end
+		local mouseDelta = UserInputService:GetMouseDelta()
+		local sensitivity = math.max(0.1, SettingsClient.Sensitivity or 1)
+		local invert = SettingsClient.InvertY and -1 or 1
+		CameraClient.Yaw = CameraClient.Yaw - mouseDelta.X * 0.16 * sensitivity
+		CameraClient.Pitch = math.clamp(CameraClient.Pitch + mouseDelta.Y * 0.14 * sensitivity * invert, -68, 58)
 
-			if moveDir.Magnitude > 0 then
-				humanoid:Move(moveDir.Unit, false)
-				-- Rotate character to face movement direction
-				root.CFrame = CFrame.new(root.Position, root.Position + moveDir.Unit)
+		local yaw = math.rad(CameraClient.Yaw)
+		local forward = Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
+		local right = Vector3.new(math.cos(yaw), 0, -math.sin(yaw))
+		local movement = Vector3.zero
+		if UserInputService:IsKeyDown(Enum.KeyCode.W) then movement = movement + forward end
+		if UserInputService:IsKeyDown(Enum.KeyCode.S) then movement = movement - forward end
+		if UserInputService:IsKeyDown(Enum.KeyCode.D) then movement = movement + right end
+		if UserInputService:IsKeyDown(Enum.KeyCode.A) then movement = movement - right end
+
+		if humanoid.Health > 0 then
+			if movement.Magnitude > 0 then
+				humanoid:Move(movement.Unit, false)
+				root.CFrame = CFrame.new(root.Position, root.Position + movement.Unit)
 			else
-				humanoid:Move(Vector3.new(0, 0, 0), false)
-				-- When idle, face camera direction
-				local lookDir = Vector3.new(-math.sin(yaw), 0, -math.cos(yaw))
-				root.CFrame = CFrame.new(root.Position, root.Position + lookDir)
+				humanoid:Move(Vector3.zero, false)
+				root.CFrame = CFrame.new(root.Position, root.Position + forward)
 			end
-
-			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then
-				humanoid.Jump = true
-			end
+			if UserInputService:IsKeyDown(Enum.KeyCode.Space) then humanoid.Jump = true end
 		end
 
-		-- Camera positioning
-		local zoom = CameraClient.BaseZoom or 8
-		local yaw = CameraClient.Yaw
-		local pitch = CameraClient.Pitch
-		local lookAt = root.Position + Vector3.new(0, 2, 0)
-
-		-- Calculate orbit position from yaw/pitch
-		local pitchRad = math.rad(pitch)
-		local yawRad = yaw
-		local camX = math.sin(yawRad) * math.cos(pitchRad) * zoom
-		local camY = math.sin(pitchRad) * zoom + zoom * 0.3
-		local camZ = math.cos(yawRad) * math.cos(pitchRad) * zoom
-		local targetPos = root.Position + Vector3.new(camX, camY, camZ)
-
-		-- Clamp camera below ground
-		if targetPos.Y < root.Position.Y + 1 then
-			targetPos = Vector3.new(targetPos.X, root.Position.Y + 1, targetPos.Z)
+		local lookVector = getLookVector(CameraClient.Yaw, CameraClient.Pitch)
+		local cameraPosition
+		local focusPosition
+		if CameraClient.Mode == "FPS" then
+			cameraPosition = root.Position + Vector3.new(0, 1.65, 0)
+			focusPosition = cameraPosition + lookVector * 100
+		else
+			local pivot = root.Position + Vector3.new(0, 1.8, 0)
+			local desired = pivot - lookVector * (CameraClient.BaseZoom or 8) + right * 1.25
+			cameraPosition = resolveCameraCollision(character, pivot, desired)
+			focusPosition = pivot + lookVector * 100
 		end
+		camera.CFrame = CFrame.new(cameraPosition, focusPosition)
 
-		camera.CFrame = CFrame.new(targetPos, lookAt)
-
-		-- Screen shake
-		if CameraClient.ShakeIntensity > 0 and CameraClient.ShakeTime < CameraClient.ShakeDuration then
-			CameraClient.ShakeTime = CameraClient.ShakeTime + dt
-			local t = 1 - (CameraClient.ShakeDuration - CameraClient.ShakeTime) / CameraClient.ShakeDuration
-			local currentShake = CameraClient.ShakeIntensity * math.sin(t * 20) * t
-			camera.CFrame = camera.CFrame * CFrame.new(
-				(math.random() - 0.5) * currentShake,
-				(math.random() - 0.5) * currentShake,
-				0
-			)
-		elseif CameraClient.ShakeIntensity > 0 then
+		if SettingsClient.CameraShake and CameraClient.ShakeIntensity > 0 and CameraClient.ShakeElapsed < CameraClient.ShakeDuration then
+			CameraClient.ShakeElapsed = CameraClient.ShakeElapsed + deltaTime
+			local progress = math.clamp(CameraClient.ShakeElapsed / math.max(0.001, CameraClient.ShakeDuration), 0, 1)
+			local strength = CameraClient.ShakeIntensity * (1 - progress)
+			camera.CFrame = camera.CFrame * CFrame.new((math.random() - 0.5) * strength, (math.random() - 0.5) * strength, 0)
+		elseif CameraClient.ShakeElapsed >= CameraClient.ShakeDuration then
 			CameraClient.ShakeIntensity = 0
 			CameraClient.ShakeDuration = 0
-			CameraClient.ShakeTime = 0
+			CameraClient.ShakeElapsed = 0
 		end
 
-		-- Camera effects
 		for effectName, effectData in pairs(CameraClient.CameraEffects) do
-			if os.clock() >= effectData.expireAt then
-				CameraClient.CameraEffects[effectName] = nil
-			end
+			if os.clock() >= effectData.expireAt then CameraClient.CameraEffects[effectName] = nil end
 		end
 	end)
 end
