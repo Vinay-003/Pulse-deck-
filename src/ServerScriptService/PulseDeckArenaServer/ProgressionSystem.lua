@@ -1,4 +1,3 @@
-
 local DataStoreService = game:GetService("DataStoreService")
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 
@@ -7,435 +6,218 @@ local ProgressionUtils = require(sharedRoot:WaitForChild("ProgressionUtils"))
 local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
 
-local ProgressionSystem = {}
+local ProgressionSystem = {Profiles = {}, DataStoreAvailable = true, Loaded = {}, Saving = {}}
+local STORE_NAME = "PulseDeckArenaProfiles_v3"
+local SCHEMA_VERSION = 3
+local store
+local ok, err = pcall(function() store = DataStoreService:GetDataStore(STORE_NAME) end)
+if not ok then ProgressionSystem.DataStoreAvailable = false; warn("[PDA] DataStore unavailable: " .. tostring(err)) end
 
-ProgressionSystem.Profiles = {}
-ProgressionSystem.DataStoreAvailable = true
-ProgressionSystem.WarnedFallback = false
-
-local store = nil
-local storeOk, storeErr = pcall(function()
-	store = DataStoreService:GetDataStore("PulseDeckArenaProfiles_v2")
-end)
-if not storeOk then
-	warn("[PDA] DataStore unavailable (Studio mode): " .. tostring(storeErr))
-	ProgressionSystem.DataStoreAvailable = false
-end
-
-local function defaultProfile()
+local function defaults()
 	return {
-		Wins = 0,
-		Losses = 0,
-		Coins = 0,
-		XP = 0,
-		Level = 1,
-		TotalKills = 0,
-		TotalDeaths = 0,
-		TotalDamage = 0,
-		FavoriteHero = nil,
+		SchemaVersion = SCHEMA_VERSION,
+		Wins = 0, Losses = 0, Coins = 0, XP = 0,
+		TotalKills = 0, TotalDeaths = 0, TotalDamage = 0,
 		UnlockedHeroes = {"bolt_runner", "iron_bulwark", "vesper_scope", "patch_flux", "fuse_jack"},
-		OwnedSkins = {},
-		EquippedSkin = "default",
-		LastPlayed = 0,
-		Achievements = {},
-		PrestigeLevel = 0,
-		BattlePassTier = 0,
-		BattlePassXP = 0,
-		BattlePassPremium = false,
-		PurchasedItems = {},
-		TotalSpent = 0,
+		OwnedSkins = {}, EquippedSkin = "default", PurchasedItems = {},
+		Achievements = {}, HeroStats = {}, FavoriteHero = nil,
+		LastPlayed = 0, CreatedAt = os.time(), UpdatedAt = os.time(),
 	}
 end
 
-local function warnFallbackOnce()
-	if ProgressionSystem.WarnedFallback then return end
-	ProgressionSystem.WarnedFallback = true
-	warn("PulseDeckArena: DataStore unavailable, using in-memory progression fallback.")
+local function mergeProfile(data)
+	local profile = defaults()
+	if type(data) == "table" then
+		for key, value in pairs(data) do profile[key] = value end
+	end
+	profile.SchemaVersion = SCHEMA_VERSION
+	profile.UnlockedHeroes = type(profile.UnlockedHeroes) == "table" and profile.UnlockedHeroes or defaults().UnlockedHeroes
+	profile.OwnedSkins = type(profile.OwnedSkins) == "table" and profile.OwnedSkins or {}
+	profile.PurchasedItems = type(profile.PurchasedItems) == "table" and profile.PurchasedItems or {}
+	profile.Achievements = type(profile.Achievements) == "table" and profile.Achievements or {}
+	profile.HeroStats = type(profile.HeroStats) == "table" and profile.HeroStats or {}
+	return profile
 end
 
 function ProgressionSystem.Init()
 	ProgressionSystem.Profiles = {}
+	ProgressionSystem.Loaded = {}
+	ProgressionSystem.Saving = {}
 end
 
 function ProgressionSystem.Load(player)
-	if not ProgressionSystem.DataStoreAvailable then
-		local profile = defaultProfile()
-		ProgressionSystem.Profiles[player.UserId] = profile
-		return profile
+	if ProgressionSystem.Loaded[player.UserId] and ProgressionSystem.Profiles[player.UserId] then return ProgressionSystem.Profiles[player.UserId] end
+	local profile = defaults()
+	if ProgressionSystem.DataStoreAvailable and store then
+		local success, data = pcall(function() return store:GetAsync("user_" .. player.UserId) end)
+		if success then profile = mergeProfile(data) else warn("[PDA] Profile load failed for " .. player.UserId .. ": " .. tostring(data)) end
 	end
-
-	local ok, data = pcall(function()
-		return store:GetAsync("user_" .. tostring(player.UserId))
-	end)
-
-	if not ok then
-		ProgressionSystem.DataStoreAvailable = false
-		warnFallbackOnce()
-		local profile = defaultProfile()
-		ProgressionSystem.Profiles[player.UserId] = profile
-		return profile
-	end
-
-	if type(data) ~= "table" then
-		data = defaultProfile()
-	end
-
-	-- Migrate / validate
-	if not data.UnlockedHeroes then
-		data.UnlockedHeroes = {"bolt_runner", "iron_bulwark", "vesper_scope", "patch_flux", "fuse_jack"}
-	end
-
-	ProgressionSystem.Profiles[player.UserId] = data
-	return data
+	ProgressionSystem.Profiles[player.UserId] = profile
+	ProgressionSystem.Loaded[player.UserId] = true
+	return profile
 end
 
 function ProgressionSystem.Save(player)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile or not ProgressionSystem.DataStoreAvailable then return end
-
+	local userId = player.UserId
+	local profile = ProgressionSystem.Profiles[userId]
+	if not profile or ProgressionSystem.Saving[userId] or not ProgressionSystem.DataStoreAvailable or not store then return false end
+	ProgressionSystem.Saving[userId] = true
+	profile.UpdatedAt = os.time()
 	profile.LastPlayed = os.time()
-
-	local ok = pcall(function()
-		store:SetAsync("user_" .. tostring(player.UserId), profile)
+	local snapshot = table.clone(profile)
+	local success, saveError = pcall(function()
+		store:UpdateAsync("user_" .. userId, function(existing)
+			local result = mergeProfile(existing)
+			for key, value in pairs(snapshot) do result[key] = value end
+			result.SchemaVersion = SCHEMA_VERSION
+			result.UpdatedAt = os.time()
+			return result
+		end)
 	end)
+	ProgressionSystem.Saving[userId] = nil
+	if not success then warn("[PDA] Profile save failed for " .. userId .. ": " .. tostring(saveError)) end
+	return success
+end
 
-	if not ok then
-		ProgressionSystem.DataStoreAvailable = false
-		warnFallbackOnce()
-	end
+local function intValue(folder, name)
+	local value = folder:FindFirstChild(name) or Instance.new("IntValue")
+	value.Name = name
+	value.Parent = folder
+	return value
 end
 
 function ProgressionSystem.CreateLeaderstats(player)
 	local profile = ProgressionSystem.Load(player)
-
-	local leaderstats = Instance.new("Folder")
-	leaderstats.Name = "leaderstats"
-	leaderstats.Parent = player
-
-	local wins = Instance.new("IntValue")
-	wins.Name = "Wins"
-	wins.Value = profile.Wins
-	wins.Parent = leaderstats
-
-	local losses = Instance.new("IntValue")
-	losses.Name = "Losses"
-	losses.Value = profile.Losses or 0
-	losses.Parent = leaderstats
-
-	local kills = Instance.new("IntValue")
-	kills.Name = "Kills"
-	kills.Value = profile.TotalKills or 0
-	kills.Parent = leaderstats
-
-	local kd = Instance.new("StringValue")
+	local folder = player:FindFirstChild("leaderstats") or Instance.new("Folder")
+	folder.Name = "leaderstats"
+	folder.Parent = player
+	intValue(folder, "Wins").Value = profile.Wins or 0
+	intValue(folder, "Losses").Value = profile.Losses or 0
+	intValue(folder, "Kills").Value = profile.TotalKills or 0
+	intValue(folder, "Coins").Value = profile.Coins or 0
+	intValue(folder, "XP").Value = profile.XP or 0
+	intValue(folder, "Level").Value = ProgressionUtils.GetLevel(profile.XP or 0)
+	local kd = folder:FindFirstChild("K/D") or Instance.new("StringValue")
 	kd.Name = "K/D"
-	local deaths = profile.TotalDeaths or 0
-	local kc = profile.TotalKills or 0
-	kd.Value = string.format("%.2f", kc / math.max(1, deaths))
-	kd.Parent = leaderstats
-
-	local coins = Instance.new("IntValue")
-	coins.Name = "Coins"
-	coins.Value = profile.Coins
-	coins.Parent = leaderstats
-
-	local xp = Instance.new("IntValue")
-	xp.Name = "XP"
-	xp.Value = profile.XP
-	xp.Parent = leaderstats
-
-	local level = Instance.new("IntValue")
-	level.Name = "Level"
-	level.Value = ProgressionUtils.GetLevel(profile.XP)
-	level.Parent = leaderstats
+	kd.Value = string.format("%.2f", (profile.TotalKills or 0) / math.max(1, profile.TotalDeaths or 0))
+	kd.Parent = folder
+	return profile
 end
 
 function ProgressionSystem.SyncLeaderstats(player)
 	local profile = ProgressionSystem.Profiles[player.UserId]
-	local leaderstats = player:FindFirstChild("leaderstats")
-	if not profile or not leaderstats then return end
-
-	local wins = leaderstats:FindFirstChild("Wins")
-	local losses = leaderstats:FindFirstChild("Losses")
-	local kills = leaderstats:FindFirstChild("Kills")
-	local kd = leaderstats:FindFirstChild("K/D")
-	local coins = leaderstats:FindFirstChild("Coins")
-	local xp = leaderstats:FindFirstChild("XP")
-	local level = leaderstats:FindFirstChild("Level")
-
-	if wins then wins.Value = profile.Wins end
-	if losses then losses.Value = profile.Losses or 0 end
-	if kills then kills.Value = profile.TotalKills or 0 end
-	if kd then
-		local d = profile.TotalDeaths or 0
-		local k = profile.TotalKills or 0
-		kd.Value = string.format("%.2f", k / math.max(1, d))
+	local folder = player:FindFirstChild("leaderstats")
+	if not profile or not folder then return end
+	for name, value in pairs({Wins = profile.Wins or 0, Losses = profile.Losses or 0, Kills = profile.TotalKills or 0, Coins = profile.Coins or 0, XP = profile.XP or 0, Level = ProgressionUtils.GetLevel(profile.XP or 0)}) do
+		local object = folder:FindFirstChild(name)
+		if object then object.Value = value end
 	end
-	if coins then coins.Value = profile.Coins end
-	if xp then xp.Value = profile.XP end
-	if level then level.Value = ProgressionUtils.GetLevel(profile.XP) end
+	local kd = folder:FindFirstChild("K/D")
+	if kd then kd.Value = string.format("%.2f", (profile.TotalKills or 0) / math.max(1, profile.TotalDeaths or 0)) end
 end
 
-function ProgressionSystem.GetLevel(xp)
-	return ProgressionUtils.GetLevel(xp)
-end
-
-function ProgressionSystem.GetXpNeededForLevel(level)
-	return ProgressionUtils.GetXpNeededForLevel(level)
-end
+function ProgressionSystem.GetLevel(xp) return ProgressionUtils.GetLevel(xp) end
+function ProgressionSystem.GetXpNeededForLevel(level) return ProgressionUtils.GetXpNeededForLevel(level) end
+function ProgressionSystem.GetProfile(player) return ProgressionSystem.Profiles[player.UserId] end
 
 function ProgressionSystem.AwardMatch(player, result, teamScore)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then
-		profile = ProgressionSystem.Load(player)
-	end
-
-	local coins = 40
-	local xp = 90
-
-	if result == "Win" then
-		coins = 75
-		xp = 140
-		profile.Wins = (profile.Wins or 0) + 1
-	elseif result == "Loss" then
-		coins = 25
-		xp = 50
-		profile.Losses = (profile.Losses or 0) + 1
-	elseif result == "Draw" then
-		coins = 20
-		xp = 30
-	end
-
-	-- Bonus based on team contribution
-	coins += math.floor((teamScore or 0) / 25)
-	xp += math.floor((teamScore or 0) / 50)
-
+	local profile = ProgressionSystem.Load(player)
+	local coins, xp = 20, 35
+	if result == "Win" then coins, xp = 75, 140; profile.Wins += 1
+	elseif result == "Loss" then coins, xp = 25, 55; profile.Losses += 1 end
+	coins += math.clamp(math.floor((tonumber(teamScore) or 0) / 100), 0, 25)
+	xp += math.clamp(math.floor((tonumber(teamScore) or 0) / 50), 0, 50)
 	profile.Coins += coins
 	profile.XP += xp
-
-	-- Update stats
-	local hero = HeroSystem.GetControlledHero(player)
+	local okHero, HeroSystem = pcall(require, script.Parent:WaitForChild("HeroSystem"))
+	local hero = okHero and HeroSystem.GetControlledHero(player) or nil
 	if hero then
-		profile.TotalKills = (profile.TotalKills or 0) + (hero.KillCount or 0)
-		profile.TotalDeaths = (profile.TotalDeaths or 0) + (hero.DeathCount or 0)
-		profile.TotalDamage = (profile.TotalDamage or 0) + math.floor(hero.DamageDealt or 0)
+		profile.TotalKills += hero.KillCount or 0
+		profile.TotalDeaths += hero.DeathCount or 0
+		profile.TotalDamage += math.floor(hero.DamageDealt or 0)
 	end
-
 	ProgressionSystem.SyncLeaderstats(player)
-end
-
-function ProgressionSystem.GetProfile(player)
-	return ProgressionSystem.Profiles[player.UserId]
+	return {coins = coins, xp = xp}
 end
 
 function ProgressionSystem.UnlockHero(player, heroId)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then return false end
-
+	local profile = ProgressionSystem.Load(player)
+	if type(heroId) ~= "string" or not HeroConfig[heroId] then return false end
 	if table.find(profile.UnlockedHeroes, heroId) then return true end
-
-	-- Cost to unlock varies by hero rarity
-	local heroDef = HeroConfig[heroId]
 	local cost = 500
-	if heroDef then
-		-- Based on role difficulty or rarity
-		cost = 300 + (#HeroConfig[heroId] and 50 or 0)
-	end
-
-	if profile.Coins >= cost then
-		profile.Coins -= cost
-		table.insert(profile.UnlockedHeroes, heroId)
-		ProgressionSystem.SyncLeaderstats(player)
-		return true
-	end
-	return false
+	if profile.Coins < cost then return false end
+	profile.Coins -= cost
+	table.insert(profile.UnlockedHeroes, heroId)
+	ProgressionSystem.SyncLeaderstats(player)
+	return true
 end
 
 function ProgressionSystem.UnlockSkin(player, heroId, skinId)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then return false end
-
-	-- Check hero is unlocked
-	if not table.find(profile.UnlockedHeroes, heroId) then return false end
-
-	local heroDef = HeroConfig[heroId]
-	if not heroDef or not heroDef.skins or not heroDef.skins[skinId] then return false end
-
-	local skinKey = heroId .. "_" .. skinId
-	if table.find(profile.OwnedSkins, skinKey) then
-		-- Already owned, just equip
-		profile.EquippedSkin = skinKey
-		ProgressionSystem.SyncLeaderstats(player)
-		return true
-	end
-
-	-- Check skin rarity and cost
-	local skinDef = heroDef.skins[skinId]
-	local cost = 100 -- default
-	if skinDef.rarity == "Common" then
-		cost = 50
-	elseif skinDef.rarity == "Rare" then
-		cost = 200
-	elseif skinDef.rarity == "Epic" then
-		cost = 500
-	elseif skinDef.rarity == "Legendary" then
-		cost = 1500
-	end
-
-	if profile.Coins >= cost then
-		profile.Coins -= cost
-		table.insert(profile.OwnedSkins, skinKey)
-		profile.EquippedSkin = skinKey
-		ProgressionSystem.SyncLeaderstats(player)
-		return true
-	end
-	return false
+	local profile = ProgressionSystem.Load(player)
+	local hero = HeroConfig[heroId]
+	local skin = hero and hero.skins and hero.skins[skinId]
+	if not skin or not table.find(profile.UnlockedHeroes, heroId) then return false end
+	local key = heroId .. "_" .. skinId
+	if table.find(profile.OwnedSkins, key) then profile.EquippedSkin = key; return true end
+	local costs = {Common = 50, Rare = 200, Epic = 500, Legendary = 1500}
+	local cost = costs[skin.rarity] or 100
+	if profile.Coins < cost then return false end
+	profile.Coins -= cost
+	table.insert(profile.OwnedSkins, key)
+	profile.EquippedSkin = key
+	ProgressionSystem.SyncLeaderstats(player)
+	return true
 end
 
 function ProgressionSystem.EquipSkin(player, heroId, skinId)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then
-		profile = ProgressionSystem.Load(player)
-	end
-
-	local heroDef = HeroConfig[heroId]
-	if heroDef and heroDef.skins and heroDef.skins[skinId] then
-		-- Allow equipping default skin without owning it
-		if skinId == "default" then
-			profile.EquippedSkin = "default"
-			ProgressionSystem.SyncLeaderstats(player)
-			return true
-		end
-
-		-- Check if skin is owned
-		local skinKey = heroId .. "_" .. skinId
-		if table.find(profile.OwnedSkins, skinKey) then
-			profile.EquippedSkin = skinId
-			ProgressionSystem.SyncLeaderstats(player)
-			return true
-		end
-	end
-	return false
+	local profile = ProgressionSystem.Load(player)
+	if skinId == "default" then profile.EquippedSkin = "default" return true end
+	local key = heroId .. "_" .. skinId
+	if not table.find(profile.OwnedSkins, key) then return false end
+	profile.EquippedSkin = key
+	return true
 end
 
 function ProgressionSystem.RecordKill(player, heroId, kills, deaths)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then return end
-
-	profile.TotalKills = (profile.TotalKills or 0) + kills
-	profile.TotalDeaths = (profile.TotalDeaths or 0) + deaths
-
-	-- Track favorite hero
-	if not profile.HeroStats then profile.HeroStats = {} end
-	if not profile.HeroStats[heroId] then
-		profile.HeroStats[heroId] = {kills = 0, deaths = 0, damage = 0}
-	end
-	profile.HeroStats[heroId].kills = profile.HeroStats[heroId].kills + kills
-	profile.HeroStats[heroId].deaths = profile.HeroStats[heroId].deaths + deaths
-
-	local bestHero = nil
-	local bestKills = 0
-	for hero, stats in pairs(profile.HeroStats) do
-		if stats.kills > bestKills then
-			bestKills = stats.kills
-			bestHero = hero
-		end
-	end
-	profile.FavoriteHero = bestHero
-
-	-- Check achievement unlocks
-	local function checkAndAwardAchievement(name, condition, xpReward)
-		if not profile.Achievements[name] and condition() then
-			profile.Achievements[name] = true
-			profile.XP = (profile.XP or 0) + xpReward
-		end
-	end
-
-	checkAndAwardAchievement("first_blood", function() return kills >= 1 end, 50)
-	checkAndAwardAchievement("five_kills", function() return kills >= 5 end, 100)
-	checkAndAwardAchievement("ten_kills", function() return kills >= 10 end, 200)
-	checkAndAwardAchievement("dominator", function() return kills >= 20 end, 500)
-	checkAndAwardAchievement("perfection", function() return kills > 0 and deaths == 0 end, 150)
-
+	local profile = ProgressionSystem.Load(player)
+	kills, deaths = math.max(0, tonumber(kills) or 0), math.max(0, tonumber(deaths) or 0)
+	profile.TotalKills += kills
+	profile.TotalDeaths += deaths
+	profile.HeroStats[heroId] = profile.HeroStats[heroId] or {kills = 0, deaths = 0, damage = 0}
+	profile.HeroStats[heroId].kills += kills
+	profile.HeroStats[heroId].deaths += deaths
 	ProgressionSystem.SyncLeaderstats(player)
 end
 
 function ProgressionSystem.GetSkinList(heroId)
-	local heroDef = HeroConfig[heroId]
-	if not heroDef or not heroDef.skins then return {"default"} end
-	local skins = {"default"}
-	for id, _ in pairs(heroDef.skins) do
-		if id ~= "default" then
-			table.insert(skins, id)
-		end
-	end
-	return skins
+	local hero = HeroConfig[heroId]
+	local result = {"default"}
+	if hero and hero.skins then for id in pairs(hero.skins) do if id ~= "default" then table.insert(result, id) end end end
+	return result
 end
 
 function ProgressionSystem.GetSkinRarity(heroId, skinId)
-	local heroDef = HeroConfig[heroId]
-	if heroDef and heroDef.skins and heroDef.skins[skinId] then
-		return heroDef.skins[skinId].rarity or "Default"
-	end
-	return "Default"
+	local hero = HeroConfig[heroId]
+	return hero and hero.skins and hero.skins[skinId] and hero.skins[skinId].rarity or "Default"
 end
 
 function ProgressionSystem.PurchaseShopItem(player, itemId)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then return false, "No profile" end
-
-	local item = nil
-	for _, shopItem in ipairs(Config.SHOP_ITEMS) do
-		if shopItem.id == itemId then
-			item = shopItem
-			break
-		end
-	end
+	local profile = ProgressionSystem.Load(player)
+	local item
+	for _, candidate in ipairs(Config.SHOP_ITEMS or {}) do if candidate.id == itemId then item = candidate break end end
 	if not item then return false, "Item not found" end
-	if profile.Coins < item.price then return false, "Not enough coins" end
-
-	profile.Coins = profile.Coins - item.price
-	profile.TotalSpent = (profile.TotalSpent or 0) + item.price
-	if not profile.PurchasedItems then profile.PurchasedItems = {} end
+	if item.category == "Currency" or string.find(item.id or "", "^coins_") then return false, "Currency packs require a verified developer-product receipt" end
+	if table.find(profile.PurchasedItems, itemId) then return false, "Already owned" end
+	local price = math.max(0, tonumber(item.price) or 0)
+	if profile.Coins < price then return false, "Not enough coins" end
+	profile.Coins -= price
 	table.insert(profile.PurchasedItems, itemId)
-
-	-- Handle rewards
-	if itemId == "coins_500" then
-		profile.Coins += 500
-	elseif itemId == "coins_1500" then
-		profile.Coins += 1500
-	elseif itemId == "coins_4000" then
-		profile.Coins += 4000
-	elseif string.find(itemId, "skin_bundle") then
-		for _, skinKey in ipairs(item.items or {}) do
-			if not table.find(profile.OwnedSkins or {}, skinKey) then
-				table.insert(profile.OwnedSkins, skinKey)
-			end
-		end
-	end
-
+	for _, skinKey in ipairs(item.items or {}) do if not table.find(profile.OwnedSkins, skinKey) then table.insert(profile.OwnedSkins, skinKey) end end
 	ProgressionSystem.SyncLeaderstats(player)
 	return true, "Purchased"
 end
 
-function ProgressionSystem.GetBattlePassRewards(tier)
-	local reward = ProgressionUtils.BATTLE_PASS_TIERS[tier]
-	return reward or nil
-end
-
-function ProgressionSystem.ClaimBattlePassReward(player, tier)
-	local profile = ProgressionSystem.Profiles[player.UserId]
-	if not profile then return false end
-	if not profile.BattlePassClaimed then profile.BattlePassClaimed = {} end
-	if profile.BattlePassClaimed[tier] then return false, "Already claimed" end
-	local reward = ProgressionSystem.GetBattlePassRewards(tier)
-	if not reward then return false, "No reward" end
-	profile.BattlePassClaimed[tier] = true
-	if reward.type == "coins" then
-		profile.Coins += reward.amount or 0
-	end
-	ProgressionSystem.SyncLeaderstats(player)
-	return true
-end
+function ProgressionSystem.GetBattlePassRewards() return nil end
+function ProgressionSystem.ClaimBattlePassReward() return false, "Battle pass disabled until reward receipts are production-ready" end
 
 return ProgressionSystem
