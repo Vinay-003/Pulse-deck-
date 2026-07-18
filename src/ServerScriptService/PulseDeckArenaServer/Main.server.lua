@@ -1,18 +1,12 @@
-local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local RunService = game:GetService("RunService")
-local Debris = game:GetService("Debris")
-local MarketplaceService = game:GetService("MarketplaceService")
 local Teams = game:GetService("Teams")
 
 local sharedRoot = ReplicatedStorage:WaitForChild("PulseDeckArena"):WaitForChild("Shared")
 local Config = require(sharedRoot:WaitForChild("Config"))
 local HeroConfig = require(sharedRoot:WaitForChild("HeroConfig"))
 local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
-local Util = require(sharedRoot:WaitForChild("Util"))
-local AbilityConfig = require(sharedRoot:WaitForChild("AbilityConfig"))
-
-local BURN_TICK_INTERVAL = 0.5
 
 local MapBuilder = require(script.Parent:WaitForChild("MapBuilder"))
 local MatchSystem = require(script.Parent:WaitForChild("MatchSystem"))
@@ -21,6 +15,26 @@ local CombatSystem = require(script.Parent:WaitForChild("CombatSystem"))
 local AISystem = require(script.Parent:WaitForChild("AISystem"))
 local AbilitySystem = require(script.Parent:WaitForChild("AbilitySystem"))
 local ProgressionSystem = require(script.Parent:WaitForChild("ProgressionSystem"))
+
+local ALLOWED_MODES = {Standard = true, KOTH = true, FFA = true}
+local ACTION_LIMITS = {
+	RequestJoinQueue = 1,
+	RequestDeckUpdate = 0.4,
+	RequestSwitchHero = 0.2,
+	RequestStartMatch = 1,
+	RequestFire = 0.02,
+	RequestReload = 0.25,
+	RequestAbility = 0.2,
+	RequestUltimate = 0.5,
+	RequestPower = 0.5,
+	RequestReady = 0.5,
+	RequestGameMode = 0.5,
+	RequestPurchase = 0.5,
+	RequestPracticeDummy = 2,
+	RequestScoreboard = 0.5,
+}
+local lastAction = {}
+local initializedPlayers = {}
 
 local function ensureWorld()
 	local world = workspace:FindFirstChild("PulseDeckArenaWorld")
@@ -31,440 +45,138 @@ local function ensureWorld()
 	end
 	for _, name in ipairs({"Map", "Heroes", "Objectives", "Pickups", "Projectiles", "Effects", "Waypoints", "Debris"}) do
 		if not world:FindFirstChild(name) then
-			local f = Instance.new("Folder")
-			f.Name = name
-			f.Parent = world
+			local folder = Instance.new("Folder")
+			folder.Name = name
+			folder.Parent = world
 		end
 	end
+	return world
 end
 
-ensureWorld()
+local function ensureTeam(name, brickColor)
+	local team = Teams:FindFirstChild(name)
+	if not team then
+		team = Instance.new("Team")
+		team.Name = name
+		team.TeamColor = BrickColor.new(brickColor)
+		team.AutoAssignable = false
+		team.Parent = Teams
+	end
+	return team
+end
 
+local function ensureRemote(folder, name, className)
+	local remote = folder:FindFirstChild(name)
+	if remote and remote.ClassName ~= className then
+		remote:Destroy()
+		remote = nil
+	end
+	if not remote then
+		remote = Instance.new(className)
+		remote.Name = name
+		remote.Parent = folder
+	end
+	return remote
+end
+
+local function isFiniteNumber(value)
+	return type(value) == "number" and value == value and value > -math.huge and value < math.huge
+end
+
+local function isFiniteVector(value)
+	return typeof(value) == "Vector3"
+		and isFiniteNumber(value.X)
+		and isFiniteNumber(value.Y)
+		and isFiniteNumber(value.Z)
+end
+
+local function normalizeDirection(value)
+	if not isFiniteVector(value) or value.Magnitude < 0.001 then return nil end
+	return value.Unit
+end
+
+local function allow(player, action)
+	local now = os.clock()
+	local key = tostring(player.UserId) .. ":" .. action
+	local interval = ACTION_LIMITS[action] or 0.1
+	if lastAction[key] and now - lastAction[key] < interval then return false end
+	lastAction[key] = now
+	return true
+end
+
+local function validDeck(heroIds)
+	if type(heroIds) ~= "table" or #heroIds ~= Config.DECK_SIZE then return nil end
+	local result = {}
+	local seen = {}
+	for _, heroId in ipairs(heroIds) do
+		if type(heroId) ~= "string" or not HeroConfig[heroId] or seen[heroId] then return nil end
+		seen[heroId] = true
+		table.insert(result, heroId)
+	end
+	return result
+end
+
+local function isAdmin(player)
+	return RunService:IsStudio() or table.find(Config.ADMIN_USER_IDS or {}, player.UserId) ~= nil
+end
+
+local world = ensureWorld()
+ensureTeam("Red", "Bright red")
+ensureTeam("Blue", "Bright blue")
 MapBuilder.BuildNeonFoundry()
-
--- Initialize core systems at startup
+CombatSystem.Init()
 AbilitySystem.Init(HeroSystem, MatchSystem, CombatSystem)
 if not AISystem.Initialized then
 	AISystem.Init(HeroSystem, MatchSystem, CombatSystem, AbilitySystem)
 	AISystem.Initialized = true
 end
 
--- Create Roblox Teams for Red and Blue
-do
-	local redTeam = Teams:FindFirstChild("Red")
-	if not redTeam then
-		redTeam = Instance.new("Team")
-		redTeam.Name = "Red"
-		redTeam.TeamColor = BrickColor.new("Bright red")
-		redTeam.AutoAssignable = false
-		redTeam.Parent = Teams
-	end
-	local blueTeam = Teams:FindFirstChild("Blue")
-	if not blueTeam then
-		blueTeam = Instance.new("Team")
-		blueTeam.Name = "Blue"
-		blueTeam.TeamColor = BrickColor.new("Bright blue")
-		blueTeam.AutoAssignable = false
-		blueTeam.Parent = Teams
+local objectivesFolder = world:WaitForChild("Objectives")
+local function registerObjectives()
+	for _, model in ipairs(objectivesFolder:GetChildren()) do
+		if model.Name == "RedCore" then CombatSystem.RegisterObjective(model, Config.TEAM_RED, Config.CORE_MAX_HEALTH, "Core")
+		elseif model.Name == "BlueCore" then CombatSystem.RegisterObjective(model, Config.TEAM_BLUE, Config.CORE_MAX_HEALTH, "Core")
+		elseif string.find(model.Name, "RedGenerator") then CombatSystem.RegisterObjective(model, Config.TEAM_RED, Config.GENERATOR_MAX_HEALTH, "Generator")
+		elseif string.find(model.Name, "BlueGenerator") then CombatSystem.RegisterObjective(model, Config.TEAM_BLUE, Config.GENERATOR_MAX_HEALTH, "Generator") end
 	end
 end
+registerObjectives()
 
-CombatSystem.Init()
-do
-	local objectivesFolder = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Objectives")
-	for _, child in ipairs(objectivesFolder:GetChildren()) do
-		if child.Name == "RedCore" then
-			CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.CORE_MAX_HEALTH, "Core")
-		elseif child.Name == "BlueCore" then
-			CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.CORE_MAX_HEALTH, "Core")
-		elseif string.find(child.Name, "RedGenerator") then
-			CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.GENERATOR_MAX_HEALTH, "Generator")
-		elseif string.find(child.Name, "BlueGenerator") then
-			CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.GENERATOR_MAX_HEALTH, "Generator")
-		end
-	end
+local root = ReplicatedStorage:WaitForChild("PulseDeckArena")
+local remotes = root:FindFirstChild("Remotes") or Instance.new("Folder")
+remotes.Name = "Remotes"
+remotes.Parent = root
+
+local names = {
+	ClientReady = "RemoteEvent", RequestJoinQueue = "RemoteEvent", RequestDeckUpdate = "RemoteEvent",
+	RequestSwitchHero = "RemoteEvent", RequestStartMatch = "RemoteEvent", RequestFire = "RemoteEvent",
+	RequestReload = "RemoteEvent", RequestAbility = "RemoteEvent", RequestUltimate = "RemoteEvent",
+	RequestCameraMode = "RemoteEvent", RequestScoreboard = "RemoteEvent", RequestPower = "RemoteEvent",
+	RequestReady = "RemoteEvent", RequestGameMode = "RemoteEvent", RequestPurchase = "RemoteEvent",
+	RequestPracticeDummy = "RemoteEvent", RequestBuy = "RemoteEvent", RequestBuyMenu = "RemoteEvent",
+	RequestPlant = "RemoteEvent", RequestDefuse = "RemoteEvent", CancelDefuse = "RemoteEvent",
+	MatchStateChanged = "RemoteEvent", HeroControlChanged = "RemoteEvent", HeroStateSnapshot = "RemoteEvent",
+	ObjectiveStateChanged = "RemoteEvent", ScoreChanged = "RemoteEvent", KillfeedEvent = "RemoteEvent",
+	DamageNumberEvent = "RemoteEvent", EffectsEvent = "RemoteEvent", AnnouncementEvent = "RemoteEvent",
+	ArmorPickup = "RemoteEvent", PlaySFX = "RemoteEvent", BombDefuseProgress = "RemoteEvent",
+	GetInitialState = "RemoteFunction",
+}
+local R = {}
+for name, className in pairs(names) do R[name] = ensureRemote(remotes, name, className) end
+
+local function announce(text, duration, player)
+	local payload = {text = text, duration = duration or 3}
+	if player then R.AnnouncementEvent:FireClient(player, payload) else R.AnnouncementEvent:FireAllClients(payload) end
 end
 
--- Create remote folder
-local remotesFolder = ReplicatedStorage:FindFirstChild("PulseDeckArena") and ReplicatedStorage.PulseDeckArena:FindFirstChild("Remotes")
-if not remotesFolder then
-	remotesFolder = Instance.new("Folder")
-	remotesFolder.Name = "Remotes"
-	local root = ReplicatedStorage:FindFirstChild("PulseDeckArena")
-	if not root then
-		root = Instance.new("Folder")
-		root.Name = "PulseDeckArena"
-		root.Parent = ReplicatedStorage
-	end
-	remotesFolder.Parent = root
-end
-
-local function ensureRemote(name, className)
-	local r = remotesFolder:FindFirstChild(name)
-	if not r then
-		r = Instance.new(className)
-		r.Name = name
-		r.Parent = remotesFolder
-	end
-	return r
-end
-
-local requestJoin = ensureRemote("RequestJoinQueue", "RemoteEvent")
-local requestDeck = ensureRemote("RequestDeckUpdate", "RemoteEvent")
-local requestSwitch = ensureRemote("RequestSwitchHero", "RemoteEvent")
-local requestStart = ensureRemote("RequestStartMatch", "RemoteEvent")
-local requestFire = ensureRemote("RequestFire", "RemoteEvent")
-local requestReload = ensureRemote("RequestReload", "RemoteEvent")
-local requestAbility = ensureRemote("RequestAbility", "RemoteEvent")
-local requestUltimate = ensureRemote("RequestUltimate", "RemoteEvent")
-local requestCamera = ensureRemote("RequestCameraMode", "RemoteEvent")
-local requestScoreboard = ensureRemote("RequestScoreboard", "RemoteEvent")
-local clientReady = ensureRemote("ClientReady", "RemoteEvent")
-local matchStateChanged = ensureRemote("MatchStateChanged", "RemoteEvent")
-local heroControlChanged = ensureRemote("HeroControlChanged", "RemoteEvent")
-local heroStateSnapshot = ensureRemote("HeroStateSnapshot", "RemoteEvent")
-local objectiveStateChanged = ensureRemote("ObjectiveStateChanged", "RemoteEvent")
-local scoreChanged = ensureRemote("ScoreChanged", "RemoteEvent")
-local killfeedEvent = ensureRemote("KillfeedEvent", "RemoteEvent")
-local damageNumberEvent = ensureRemote("DamageNumberEvent", "RemoteEvent")
-local effectsEvent = ensureRemote("EffectsEvent", "RemoteEvent")
-local announcementEvent = ensureRemote("AnnouncementEvent", "RemoteEvent")
-local getInitialState = ensureRemote("GetInitialState", "RemoteFunction")
-local armorPickupEvent = ensureRemote("ArmorPickup", "RemoteEvent")
-local playSFX = ensureRemote("PlaySFX", "RemoteEvent")
-local requestPower = ensureRemote("RequestPower", "RemoteEvent")
-local requestBuy = ensureRemote("RequestBuy", "RemoteEvent")
-local requestBuyMenu = ensureRemote("RequestBuyMenu", "RemoteEvent")
-local requestReady = ensureRemote("RequestReady", "RemoteEvent")
-local requestPurchase = ensureRemote("RequestPurchase", "RemoteEvent")
-local requestPracticeDummy = ensureRemote("RequestPracticeDummy", "RemoteEvent")
-local requestPlant = ensureRemote("RequestPlant", "RemoteEvent")
-local requestDefuse = ensureRemote("RequestDefuse", "RemoteEvent")
-local cancelDefuse = ensureRemote("CancelDefuse", "RemoteEvent")
-local bombDefuseProgress = ensureRemote("BombDefuseProgress", "RemoteEvent")
-
--- Forward SFX to all clients
-playSFX.OnServerEvent:Connect(function(player, payload)
-	if payload and payload.soundName then
-		playSFX:FireAllClients(payload)
-	end
-end)
-
-MatchSystem.ReadyState = {}
-
--- Request handlers
-requestJoin.OnServerEvent:Connect(function(player)
-	MatchSystem.RequestJoin(player)
-end)
-
-requestDeck.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.State ~= "DeckSelect" then return end
-	if type(payload) ~= "table" or type(payload.heroIds) ~= "table" then return end
-	-- Validate hero IDs
-	local validIds = {}
-	for _, id in ipairs(payload.heroIds) do
-		if HeroConfig[id] then
-			table.insert(validIds, id)
-		end
-	end
-	if #validIds == 5 then
-		MatchSystem.Decks[player.UserId] = validIds
-	end
-end)
-
-requestSwitch.OnServerEvent:Connect(function(player, payload)
-	if type(payload) ~= "table" or type(payload.slot) ~= "number" then return end
-	HeroSystem.SwitchHero(player, payload.slot)
-end)
-
-requestStart.OnServerEvent:Connect(function(_player)
-	if MatchSystem.State == "DeckSelect" then
-		MatchSystem.BeginMatch()
-	end
-end)
-
-requestFire.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath" then return end
-	if type(payload) ~= "table" then return end
-	if typeof(payload.direction) ~= "Vector3" then return end
+local function sendState(player)
 	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	if hero.Stunned then return end
-	if typeof(payload.origin) == "Vector3" and (payload.origin - hero.Root.Position).Magnitude > 35 then return end
-
-	-- Rapid fire check
-	local weapon = WeaponConfig[hero.WeaponId]
-	if weapon then
-		local minInterval = weapon.fireInterval or 0.1
-		if hero.LastFireAt and os.clock() - hero.LastFireAt < minInterval * 0.8 then return end
-		hero.LastFireAt = os.clock()
-	end
-
-	CombatSystem.FireWeapon(hero, payload.direction)
-end)
-
-requestReload.OnServerEvent:Connect(function(player)
-	if MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	CombatSystem.RequestReload(hero)
-end)
-
-requestAbility.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath" then return end
-	if MatchSystem.State == "SuddenDeath" then
-		local hero = HeroSystem.GetControlledHero(player)
-		if hero and hero.UltimateId then
-			AbilitySystem.UseUltimate(hero)
-			return
-		end
-	end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	AbilitySystem.UseAbility(hero, payload or {})
-end)
-
-requestUltimate.OnServerEvent:Connect(function(player)
-	if MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	if not hero.UltimateId then return end
-	AbilitySystem.UseUltimate(hero)
-end)
-
--- Hero power activation
-requestPower.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	local heroDef = HeroConfig[hero.HeroId]
-	if not heroDef or not heroDef.powers then return end
-	local powerId = payload and payload.powerId
-	if not powerId or not heroDef.powers[powerId] then return end
-	local powerDef = heroDef.powers[powerId]
-	hero.ActiveEffects = hero.ActiveEffects or {}
-	local powerKey = "power_" .. powerId
-
-	if powerId == "teamHeal" then
-		for _, h in pairs(HeroSystem.HeroesByGuid) do
-			if h.Alive and h.TeamId == hero.TeamId and (h.Root.Position - hero.Root.Position).Magnitude <= (powerDef.radius or 20) then
-				h.Health = math.min(h.MaxHealth, h.Health + (powerDef.amount or 30))
-				h.Humanoid.Health = h.Health
-			end
-		end
-		effectsEvent:FireAllClients({effectType = "HealRing", position = hero.Root.Position, radius = powerDef.radius or 20, duration = 0.7, color = Color3.fromRGB(92, 255, 180)})
-		return
-	end
-
-	if powerId == "energyDrain" then
-		for _, h in pairs(HeroSystem.HeroesByGuid) do
-			if h.Alive and h.TeamId ~= hero.TeamId then
-				local d = (h.Root.Position - hero.Root.Position).Magnitude
-				if d <= (powerDef.radius or 12) then
-					CombatSystem.ApplyDamage(hero, h, powerDef.dps or 10, "ability")
-				end
-			end
-		end
-		effectsEvent:FireAllClients({effectType = "EnergyDrain", position = hero.Root.Position, radius = powerDef.radius or 12, duration = powerDef.duration or 4, color = Color3.fromRGB(100, 200, 255)})
-		return
-	end
-
-	if powerId == "groundSlam" then
-		for _, h in pairs(HeroSystem.HeroesByGuid) do
-			if h.Alive and h.TeamId ~= hero.TeamId then
-				local d = (h.Root.Position - hero.Root.Position).Magnitude
-				if d <= (powerDef.radius or 14) then
-					CombatSystem.ApplyDamage(hero, h, 30, "ability")
-					h.Stunned = true
-					task.delay(powerDef.stunDuration or 2, function() if h then h.Stunned = false end end)
-				end
-			end
-		end
-		effectsEvent:FireAllClients({effectType = "GroundSlam", position = hero.Root.Position, radius = powerDef.radius or 14, duration = 1})
-		return
-	end
-
-	if powerId == "blastWave" then
-		for _, h in pairs(HeroSystem.HeroesByGuid) do
-			if h.Alive and h.TeamId ~= hero.TeamId then
-				local d = (h.Root.Position - hero.Root.Position).Magnitude
-				if d <= (powerDef.radius or 15) and h.Root then
-					local knockDir = (h.Root.Position - hero.Root.Position).Unit
-					h.Root.Velocity = knockDir * (powerDef.force or 70) + Vector3.new(0, 20, 0)
-				end
-			end
-		end
-		effectsEvent:FireAllClients({effectType = "Explosion", position = hero.Root.Position, radius = powerDef.radius or 15, duration = 0.5})
-		return
-	end
-
-	hero.ActiveEffects[powerKey] = {
-		ExpireAt = os.clock() + (powerDef.duration or 5),
-		LastTick = os.clock(),
-		PowerDef = powerDef,
-	}
-	effectsEvent:FireAllClients({effectType = "PowerActivated", heroGuid = hero.Guid, powerId = powerId, duration = powerDef.duration or 5})
-end)
-
--- Bomb plant remote
-requestPlant.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.GameMode ~= "Bomb" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	if not hero.HasBomb then return end
-	local sitePos = payload and payload.sitePosition
-	if not sitePos then return end
-	MatchSystem.PlantBomb(hero, sitePos)
-end)
-
--- Bomb defuse remote
-requestDefuse.OnServerEvent:Connect(function(player)
-	if MatchSystem.GameMode ~= "Bomb" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	MatchSystem.StartDefuse(hero)
-end)
-
--- Cancel defuse remote
-cancelDefuse.OnServerEvent:Connect(function(player)
-	if MatchSystem.GameMode ~= "Bomb" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	MatchSystem.CancelDefuse(hero)
-end)
-
--- Buy menu remote
-requestBuyMenu.OnServerEvent:Connect(function(player)
-	if MatchSystem.GameMode ~= "Bomb" then return end
-	if MatchSystem.RoundPhase ~= "Buy" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	requestBuyMenu:FireClient(player, {
-		money = hero.Money or 0,
-		weaponId = hero.WeaponId,
-	})
-end)
-
--- Buy weapon remote
-requestBuy.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.GameMode ~= "Bomb" then return end
-	if MatchSystem.RoundPhase ~= "Buy" then return end
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	local weaponId = payload and payload.weaponId
-	if not weaponId then return end
-	local price = Config.WEAPON_PRICES[weaponId]
-	if not price then return end
-	if (hero.Money or 0) < price then return end
-	local WeaponConfig = require(sharedRoot:WaitForChild("WeaponConfig"))
-	if not WeaponConfig[weaponId] then return end
-	hero.Money = hero.Money - price
-	hero.WeaponId = weaponId
-	hero.Ammo = (WeaponConfig[weaponId].magazineSize or 30)
-	hero.ReserveAmmo = (WeaponConfig[weaponId].reserveAmmo or (WeaponConfig[weaponId].magazineSize or 30) * 3)
-	hero.SpentThisRound = (hero.SpentThisRound or 0) + price
-	requestBuyMenu:FireClient(player, {
-		money = hero.Money,
-		weaponId = hero.WeaponId,
-		bought = weaponId,
-	})
-end)
-
--- Ready-up handler
-requestReady.OnServerEvent:Connect(function(player)
-	if MatchSystem.State ~= "DeckSelect" and MatchSystem.State ~= "Lobby" then return end
-	MatchSystem.ReadyState[player.UserId] = not (MatchSystem.ReadyState[player.UserId] or false)
-	local readyText = MatchSystem.ReadyState[player.UserId] and "ready" or "not ready"
-	announcementEvent:FireAllClients({text = player.Name .. " is " .. readyText, duration = 3})
-
-	-- Check if all human players are ready
-	local allReady = true
-	for _, plr in ipairs(Players:GetPlayers()) do
-		if not MatchSystem.ReadyState[plr.UserId] then
-			allReady = false
-			break
-		end
-	end
-	if allReady and #Players:GetPlayers() >= 1 then
-		MatchSystem.Timer = math.min(MatchSystem.Timer or 15, 5)
-		announcementEvent:FireAllClients({text = "All ready! Match starting soon...", duration = 3})
-	end
-end)
-
-requestPurchase.OnServerEvent:Connect(function(player, payload)
-	if not payload or not payload.itemId then return end
-	local ok, msg = ProgressionSystem.PurchaseShopItem(player, payload.itemId)
-	if ok then
-		requestPurchase:FireClient(player, {success = true, itemId = payload.itemId})
-	else
-		requestPurchase:FireClient(player, {success = false, error = msg})
-	end
-end)
-
-requestPracticeDummy.OnServerEvent:Connect(function(player)
-	local hero = HeroSystem.GetControlledHero(player)
-	if not hero then return end
-	local dummy = Instance.new("Part")
-	dummy.Name = "PracticeDummy"
-	dummy.Size = Vector3.new(2, 4, 1)
-	dummy.Position = hero.Root.Position + hero.Root.CFrame.LookVector * 10
-	dummy.Color = Color3.fromRGB(255, 100, 100)
-	dummy.Material = Enum.Material.SmoothPlastic
-	dummy.Anchored = true
-	dummy.CanCollide = true
-	dummy.Parent = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Effects")
-	task.delay(30, function() if dummy and dummy.Parent then dummy:Destroy() end end)
-end)
-
-requestCamera.OnServerEvent:Connect(function(_player, _payload)
-	-- Camera is client-owned.
-end)
-
-local requestGameMode = ensureRemote("RequestGameMode", "RemoteEvent")
-requestGameMode.OnServerEvent:Connect(function(player, payload)
-	if MatchSystem.State == "Lobby" or MatchSystem.State == "DeckSelect" then
-		if payload and payload.mode then
-			MatchSystem.GameMode = payload.mode
-			announcementEvent:FireAllClients({text = "Game mode: " .. payload.mode, duration = 3})
-		end
-	end
-end)
-
-requestScoreboard.OnServerEvent:Connect(function(player)
-	local rows = {}
-	for _, plr in ipairs(Players:GetPlayers()) do
-		local teamId = MatchSystem.GetTeam(plr.UserId) or "None"
-		local hero = HeroSystem.GetControlledHero(plr)
-		local kills = 0
-		local deaths = 0
-		local damage = 0
-		if hero then
-			kills = hero.KillCount or 0
-			deaths = hero.DeathCount or 0
-			damage = hero.DamageDealt or 0
-		end
-		table.insert(rows, {
-			name = plr.Name,
-			teamId = teamId,
-			score = MatchSystem.Score[teamId] or 0,
-			kills = kills,
-			deaths = deaths,
-			damage = damage,
-			kd = kills / math.max(1, deaths),
-		})
-	end
-	requestScoreboard:FireClient(player, { players = rows })
-end)
-
-clientReady.OnServerEvent:Connect(function(player)
-	local prof = ProgressionSystem.Profiles[player.UserId]
-	local progression = prof or {Wins = 0, Coins = 0, XP = 0}
-
-	matchStateChanged:FireClient(player, {
+	R.MatchStateChanged:FireClient(player, {
 		state = MatchSystem.State,
 		timerRemaining = MatchSystem.Timer,
 		redScore = MatchSystem.Score.Red,
 		blueScore = MatchSystem.Score.Blue,
+		winner = MatchSystem.Winner,
 		teamId = MatchSystem.GetTeam(player.UserId),
 		gameMode = MatchSystem.GameMode,
 		roundNumber = MatchSystem.RoundNumber,
@@ -472,16 +184,11 @@ clientReady.OnServerEvent:Connect(function(player)
 		bombState = MatchSystem.BombState,
 		bombTimer = MatchSystem.BombTimer,
 		roundScore = MatchSystem.RoundScore,
-		hasBomb = false,
+		hasBomb = hero and hero.HasBomb == true or false,
 	})
+end
 
-	requestScoreboard:FireClient(player, {
-		players = {},
-		matchMode = MatchSystem.GameMode,
-	})
-end)
-
-getInitialState.OnServerInvoke = function(player)
+R.GetInitialState.OnServerInvoke = function(player)
 	local profile = ProgressionSystem.Profiles[player.UserId]
 	return {
 		gameName = Config.GAME_NAME,
@@ -492,7 +199,6 @@ getInitialState.OnServerInvoke = function(player)
 		score = MatchSystem.Score,
 		progression = profile or {Wins = 0, Coins = 0, XP = 0},
 		gameMode = MatchSystem.GameMode,
-		money = 800,
 		roundNumber = MatchSystem.RoundNumber,
 		roundScore = MatchSystem.RoundScore,
 		roundPhase = MatchSystem.RoundPhase,
@@ -502,591 +208,214 @@ getInitialState.OnServerInvoke = function(player)
 	}
 end
 
-Players.PlayerAdded:Connect(function(player)
+R.ClientReady.OnServerEvent:Connect(function(player)
+	if not allow(player, "ClientReady") then return end
+	sendState(player)
+end)
+
+R.RequestJoinQueue.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestJoinQueue") then return end
+	if MatchSystem.State ~= "Lobby" then return end
+	MatchSystem.RequestJoin(player)
+end)
+
+R.RequestDeckUpdate.OnServerEvent:Connect(function(player, payload)
+	if not allow(player, "RequestDeckUpdate") or MatchSystem.State ~= "DeckSelect" then return end
+	local deck = validDeck(type(payload) == "table" and payload.heroIds or nil)
+	if not deck then announce("Choose five unique heroes.", 2, player) return end
+	MatchSystem.Decks[player.UserId] = deck
+end)
+
+R.RequestReady.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestReady") or MatchSystem.State ~= "DeckSelect" then return end
+	MatchSystem.ReadyState = MatchSystem.ReadyState or {}
+	MatchSystem.ReadyState[player.UserId] = not MatchSystem.ReadyState[player.UserId]
+	announce(player.DisplayName .. (MatchSystem.ReadyState[player.UserId] and " is ready" or " is not ready"), 2)
+end)
+
+R.RequestStartMatch.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestStartMatch") or MatchSystem.State ~= "DeckSelect" then return end
+	if not MatchSystem.Decks[player.UserId] then announce("Confirm your deck first.", 2, player) return end
+	local humans = Players:GetPlayers()
+	local permitted = isAdmin(player) or #humans == 1
+	if not permitted then
+		permitted = true
+		for _, human in ipairs(humans) do
+			if not (MatchSystem.ReadyState and MatchSystem.ReadyState[human.UserId]) then permitted = false break end
+		end
+	end
+	if not permitted then announce("All players must ready up.", 2, player) return end
+	MatchSystem.BeginMatch()
+end)
+
+R.RequestGameMode.OnServerEvent:Connect(function(player, payload)
+	if not allow(player, "RequestGameMode") or (MatchSystem.State ~= "Lobby" and MatchSystem.State ~= "DeckSelect") then return end
+	local mode = type(payload) == "table" and payload.mode or nil
+	if not ALLOWED_MODES[mode] then announce("That mode is not enabled in this build.", 2, player) return end
+	if not isAdmin(player) and #Players:GetPlayers() > 1 then return end
+	MatchSystem.GameMode = mode
+	announce("Mode: " .. mode, 2)
+end)
+
+R.RequestSwitchHero.OnServerEvent:Connect(function(player, payload)
+	if not allow(player, "RequestSwitchHero") then return end
+	local slot = type(payload) == "table" and payload.slot or nil
+	if not isFiniteNumber(slot) or slot % 1 ~= 0 or slot < 1 or slot > Config.DECK_SIZE then return end
+	HeroSystem.SwitchHero(player, slot)
+end)
+
+R.RequestFire.OnServerEvent:Connect(function(player, payload)
+	if not allow(player, "RequestFire") or (MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath") then return end
+	if type(payload) ~= "table" then return end
+	local hero = HeroSystem.GetControlledHero(player)
+	if not hero or not hero.Alive or hero.Stunned or not hero.Root then return end
+	local direction = normalizeDirection(payload.direction)
+	if not direction then return end
+	if isFiniteVector(payload.origin) and (payload.origin - hero.Root.Position).Magnitude > 12 then return end
+	local weapon = WeaponConfig[hero.WeaponId]
+	if not weapon then return end
+	local multiplier = 1
+	if hero.ActiveEffects and hero.ActiveEffects.overcharge then multiplier = hero.ActiveEffects.overcharge.FireRateMultiplier or 1 end
+	local minimum = math.max(0.025, (weapon.fireInterval or 0.1) / math.max(0.1, multiplier))
+	local now = os.clock()
+	if hero.ServerLastFireAt and now - hero.ServerLastFireAt < minimum * 0.95 then return end
+	hero.ServerLastFireAt = now
+	CombatSystem.FireWeapon(hero, direction)
+end)
+
+R.RequestReload.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestReload") then return end
+	local hero = HeroSystem.GetControlledHero(player)
+	if hero and hero.Alive then CombatSystem.RequestReload(hero) end
+end)
+
+R.RequestAbility.OnServerEvent:Connect(function(player, payload)
+	if not allow(player, "RequestAbility") or (MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath") then return end
+	local hero = HeroSystem.GetControlledHero(player)
+	if not hero or not hero.Alive or hero.Stunned then return end
+	local direction = type(payload) == "table" and normalizeDirection(payload.direction) or nil
+	AbilitySystem.UseAbility(hero, {direction = direction or hero.Root.CFrame.LookVector})
+end)
+
+R.RequestUltimate.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestUltimate") or (MatchSystem.State ~= "ActiveMatch" and MatchSystem.State ~= "SuddenDeath") then return end
+	local hero = HeroSystem.GetControlledHero(player)
+	if hero and hero.Alive and not hero.Stunned then AbilitySystem.UseUltimate(hero) end
+end)
+
+R.RequestPower.OnServerEvent:Connect(function(player, payload)
+	if not allow(player, "RequestPower") then return end
+	local hero = HeroSystem.GetControlledHero(player)
+	local powerId = type(payload) == "table" and payload.powerId or nil
+	local definition = hero and HeroConfig[hero.HeroId]
+	if not hero or not hero.Alive or type(powerId) ~= "string" or not definition or not definition.powers or not definition.powers[powerId] then return end
+	local key = "power_" .. powerId
+	hero.ActiveEffects = hero.ActiveEffects or {}
+	if hero.ActiveEffects[key] and os.clock() < hero.ActiveEffects[key].ExpireAt then return end
+	local power = definition.powers[powerId]
+	hero.ActiveEffects[key] = {ExpireAt = os.clock() + (power.duration or 5), LastTick = os.clock(), PowerDef = power}
+	R.EffectsEvent:FireAllClients({effectType = "PowerActivated", heroGuid = hero.Guid, powerId = powerId, duration = power.duration or 5})
+end)
+
+R.RequestPracticeDummy.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestPracticeDummy") or MatchSystem.State == "ActiveMatch" then return end
+	local hero = HeroSystem.GetControlledHero(player)
+	if not hero or not hero.Root then return end
+	local existing = world.Effects:FindFirstChild("PracticeDummy_" .. player.UserId)
+	if existing then existing:Destroy() end
+	local dummy = Instance.new("Part")
+	dummy.Name = "PracticeDummy_" .. player.UserId
+	dummy.Size = Vector3.new(2, 5, 2)
+	dummy.CFrame = hero.Root.CFrame * CFrame.new(0, 0, -12)
+	dummy.Anchored = true
+	dummy.Material = Enum.Material.SmoothPlastic
+	dummy.Color = Color3.fromRGB(220, 72, 88)
+	dummy.Parent = world.Effects
+	task.delay(30, function() if dummy.Parent then dummy:Destroy() end end)
+end)
+
+R.RequestScoreboard.OnServerEvent:Connect(function(player)
+	if not allow(player, "RequestScoreboard") then return end
+	local rows = {}
+	for _, human in ipairs(Players:GetPlayers()) do
+		local hero = HeroSystem.GetControlledHero(human)
+		table.insert(rows, {name = human.DisplayName, teamId = MatchSystem.GetTeam(human.UserId) or "None", score = MatchSystem.Score[MatchSystem.GetTeam(human.UserId)] or 0, kills = hero and hero.KillCount or 0, deaths = hero and hero.DeathCount or 0, damage = hero and hero.DamageDealt or 0})
+	end
+	R.RequestScoreboard:FireClient(player, {players = rows})
+end)
+
+R.PlaySFX.OnServerEvent:Connect(function() end)
+R.RequestPlant.OnServerEvent:Connect(function(player) announce("Bomb mode is disabled pending secure site validation.", 2, player) end)
+R.RequestDefuse.OnServerEvent:Connect(function() end)
+R.CancelDefuse.OnServerEvent:Connect(function() end)
+R.RequestBuy.OnServerEvent:Connect(function() end)
+R.RequestBuyMenu.OnServerEvent:Connect(function() end)
+
+local function initializePlayer(player)
+	if initializedPlayers[player] then return end
+	initializedPlayers[player] = true
 	MatchSystem.AssignTeam(player)
 	ProgressionSystem.CreateLeaderstats(player)
 	ProgressionSystem.Load(player)
-
 	MatchSystem.Killstreaks[player.UserId] = 0
 	MatchSystem.FFAKills[player.UserId] = 0
+	MatchSystem.ReadyState = MatchSystem.ReadyState or {}
 	MatchSystem.ReadyState[player.UserId] = false
+end
 
-	player.Chatted:Connect(function(message)
-		local isAdmin = RunService:IsStudio() or table.find(Config.ADMIN_USER_IDS, player.UserId) ~= nil
-		if not isAdmin then return end
-
-		local args = string.split(message:lower(), " ")
-		if args[1] == "/pda_reset" then
-			MatchSystem.Reset()
-		elseif args[1] == "/pda_start" then
-			if MatchSystem.State == "Lobby" then
-				MatchSystem.RequestJoin(player)
-			end
-			if MatchSystem.State == "DeckSelect" then
-				MatchSystem.BeginMatch()
-			end
-		elseif args[1] == "/pda_bots" then
-			MatchSystem.EnsureBotOpponent()
-		elseif args[1] == "/pda_winred" then
-			MatchSystem.EndMatch(Config.TEAM_RED)
-		elseif args[1] == "/pda_winblue" then
-			MatchSystem.EndMatch(Config.TEAM_BLUE)
-		elseif args[1] == "/pda_mode" then
-			if args[2] == "ffa" then
-				MatchSystem.GameMode = "FFA"
-			elseif args[2] == "koth" then
-				MatchSystem.GameMode = "KOTH"
-			elseif args[2] == "ctf" then
-				MatchSystem.GameMode = "CTF"
-			elseif args[2] == "bomb" then
-				MatchSystem.GameMode = "Bomb"
-			elseif args[2] == "standard" then
-				MatchSystem.GameMode = "Standard"
-			end
-			announcementEvent:FireAllClients({text = "Game mode changed to " .. tostring(MatchSystem.GameMode), duration = 5})
-		elseif args[1] == "/pda_givexp" then
-			local prof = ProgressionSystem.Profiles[player.UserId]
-			if prof then
-				prof.XP = (prof.XP or 0) + 1000
-				ProgressionSystem.SyncLeaderstats(player)
-			end
-		elseif args[1] == "/pda_givecoins" then
-			local prof = ProgressionSystem.Profiles[player.UserId]
-			if prof then
-				prof.Coins = (prof.Coins or 0) + 1000
-				ProgressionSystem.SyncLeaderstats(player)
-			end
-		end
-	end)
-end)
-
+Players.PlayerAdded:Connect(initializePlayer)
+for _, player in ipairs(Players:GetPlayers()) do task.spawn(initializePlayer, player) end
 Players.PlayerRemoving:Connect(function(player)
 	ProgressionSystem.Save(player)
 	HeroSystem.RemoveOwner(player.UserId)
-	MatchSystem.Killstreaks[player.UserId] = nil
-	MatchSystem.FFAKills[player.UserId] = nil
+	initializedPlayers[player] = nil
+	for key in pairs(lastAction) do if string.find(key, "^" .. player.UserId .. ":") then lastAction[key] = nil end end
+end)
+
+game:BindToClose(function()
+	for _, player in ipairs(Players:GetPlayers()) do ProgressionSystem.Save(player) end
+	task.wait(1)
 end)
 
 MatchSystem.OnEnded(function(winnerTeam)
 	for _, player in ipairs(Players:GetPlayers()) do
-		local teamId = MatchSystem.GetTeam(player.UserId)
-		local result = "Draw"
-		if teamId == winnerTeam then
-			result = "Win"
-		elseif teamId ~= nil and winnerTeam ~= Config.TEAM_NONE then
-			result = "Loss"
-		end
-
-		local hero = HeroSystem.GetControlledHero(player)
-		local extraXP = 0
-		if hero then
-			extraXP = (hero.KillCount or 0) * 15 + math.floor((hero.DamageDealt or 0) / 10)
-			-- Hero mastery increment
-			local profile = ProgressionSystem.Profiles[player.UserId]
-			if profile then
-				profile.HeroMastery = profile.HeroMastery or {}
-				profile.HeroMastery[hero.HeroId] = (profile.HeroMastery[hero.HeroId] or 0) + (hero.KillCount or 0)
-			end
-		end
-
-		local profile = ProgressionSystem.Profiles[player.UserId]
-		if profile then
-			profile.XP = (profile.XP or 0) + extraXP
-			ProgressionSystem.SyncLeaderstats(player)
-		end
-
-		local totalScore = (MatchSystem.Score.Red or 0) + (MatchSystem.Score.Blue or 0)
-		ProgressionSystem.AwardMatch(player, result, totalScore)
+		local team = MatchSystem.GetTeam(player.UserId)
+		local result = team == winnerTeam and "Win" or (winnerTeam == Config.TEAM_NONE and "Draw" or "Loss")
+		ProgressionSystem.AwardMatch(player, result, (MatchSystem.Score.Red or 0) + (MatchSystem.Score.Blue or 0))
 		ProgressionSystem.Save(player)
 	end
-
-	local winText = "DRAW"
-	if winnerTeam == Config.TEAM_RED then
-		winText = "RED TEAM WINS!"
-	elseif winnerTeam == Config.TEAM_BLUE then
-		winText = "BLUE TEAM WINS!"
-	end
-	announcementEvent:FireAllClients({text = winText, duration = 7})
 end)
 
--- Helper: process burn effects on a hero
-local function processBurn(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.burn then return end
-	local newBurns = {}
-	for _, burn in ipairs(hero.ActiveEffects.burn) do
-		if now >= burn.ExpireAt then
-			-- Burn expired
-		else
-			if now - burn.LastTick >= BURN_TICK_INTERVAL then
-				burn.LastTick = now
-				CombatSystem.ApplyDamage(hero, hero, burn.DamagePerTick, "burn")
-			end
-			table.insert(newBurns, burn)
-		end
-	end
-	if #newBurns == 0 then
-		hero.ActiveEffects.burn = nil
-	else
-		hero.ActiveEffects.burn = newBurns
-	end
-end
-
--- Helper: process freeze effects on a hero
-local function processFreeze(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.frozen then return end
-	local freeze = hero.ActiveEffects.frozen
-	if now >= freeze.ExpireAt then
-		hero.ActiveEffects.frozen = nil
-		local heroDef = HeroConfig[hero.HeroId]
-		if heroDef then hero.Humanoid.WalkSpeed = heroDef.walkSpeed end
-	else
-		local heroDef = HeroConfig[hero.HeroId]
-		if heroDef then
-			hero.Humanoid.WalkSpeed = heroDef.walkSpeed * freeze.SlowMultiplier
-		end
-	end
-end
-
--- Helper: process supernova channel
-local function processSupernova(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.supernovaChannel then return end
-	local channel = hero.ActiveEffects.supernovaChannel
-	if now >= channel.ExpireAt then
-		-- Detonate
-		hero.ActiveEffects.supernovaChannel = nil
-		CombatSystem.DamageRadius(hero, hero.Root.Position, channel.Radius, channel.Damage, 1.5)
-		effectsEvent:FireAllClients({
-			effectType = "SupernovaExplosion",
-			position = hero.Root.Position,
-			radius = channel.Radius,
-			duration = 1,
-			color = Color3.fromRGB(255, 200, 50),
-		})
-		-- Knockback nearby enemies
-		for _, h in pairs(HeroSystem.HeroesByGuid) do
-			if h.Alive and h.TeamId ~= hero.TeamId then
-				local dist = (h.Root.Position - hero.Root.Position).Magnitude
-				if dist <= channel.Radius and h.Root then
-					h.Root.Velocity = Vector3.new(0, 40, 0) + (h.Root.Position - hero.Root.Position).Unit * channel.KnockbackForce
-				end
-			end
-		end
-	elseif now % 0.5 < 0.05 then
-		-- Pulse visual during channel
-		effectsEvent:FireAllClients({
-			effectType = "SupernovaPulse",
-			position = hero.Root.Position,
-			radius = channel.Radius * (1 + (now % 1)),
-			color = Color3.fromRGB(255, 200, 50),
-		})
-	end
-end
-
--- Helper: process tether effects
-local function processTether(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.tether then return end
-	local tether = hero.ActiveEffects.tether
-	if now >= tether.ExpireAt then
-		hero.ActiveEffects.tether = nil
-		return
-	end
-	-- Find target
-	local target = HeroSystem.HeroesByGuid[tether.TargetGuid]
-	if not target or not target.Alive then
-		hero.ActiveEffects.tether = nil
-		return
-	end
-	-- Heal self and target
-	AbilitySystem.Heal(hero, tether.HealthShareRate * 0.25)
-	if target.Alive then
-		AbilitySystem.Heal(target, tether.HealthShareRate * 0.25)
-	end
-end
-
--- Helper: process tethered-by effects
-local function processTetheredBy(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.tetheredBy then return end
-	local tetherOwner = HeroSystem.HeroesByGuid[hero.ActiveEffects.tetheredBy]
-	if not tetherOwner or not tetherOwner.ActiveEffects or not tetherOwner.ActiveEffects.tether then
-		hero.ActiveEffects.tetheredBy = nil
-		return
-	end
-	-- Receive heal passively
-	AbilitySystem.Heal(hero, 5 * 0.25)
-end
-
--- Helper: process berserk effect
-local function processBerserk(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.berserk then return end
-	local berserk = hero.ActiveEffects.berserk
-	if now >= berserk.ExpireAt then
-		hero.ActiveEffects.berserk = nil
-		-- Reset walk speed
-		local heroDef = HeroConfig[hero.HeroId]
-		if heroDef then
-			hero.Humanoid.WalkSpeed = heroDef.walkSpeed
-		end
-	end
-end
-
--- Helper: process phoenix dive impact
-local function processPhoenixDive(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.phoenixDiving then return end
-	-- Check if hero has landed (close to ground)
-	if hero.Root.Position.Y < 5 then
-		hero.ActiveEffects.phoenixDiving = nil
-		-- Deal damage on impact
-		CombatSystem.DamageRadius(hero, hero.Root.Position, 15, 120, 1.0)
-		effectsEvent:FireAllClients({
-			effectType = "PhoenixDiveImpact",
-			position = hero.Root.Position,
-			radius = 15,
-			duration = 0.5,
-			color = Color3.fromRGB(255, 100, 0),
-		})
-		-- Self-heal
-		local healAmt = math.min(hero.MaxHealth - hero.Health, 100)
-		if healAmt > 0 then
-			AbilitySystem.Heal(hero, healAmt)
-		end
-	end
-end
-
--- Helper: process smoke screen
-local function processSmokeScreen(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.smokeScreen then return end
-	local smoke = hero.ActiveEffects.smokeScreen
-	if now >= smoke.ExpireAt then
-		hero.ActiveEffects.smokeScreen = nil
-		-- Reset walk speed
-		local heroDef = HeroConfig[hero.HeroId]
-		if heroDef then
-			hero.Humanoid.WalkSpeed = heroDef.walkSpeed
-		end
-	end
-end
-
--- Helper: process radar pulse
-local function processRadarPulse(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.radarPulse then return end
-	if now >= hero.ActiveEffects.radarPulse.ExpireAt then
-		hero.ActiveEffects.radarPulse = nil
-	end
-end
-
--- Helper: process tactical overlay
-local function processTacticalOverlay(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.tacticalOverlay then return end
-	if now >= hero.ActiveEffects.tacticalOverlay.ExpireAt then
-		hero.ActiveEffects.tacticalOverlay = nil
-	end
-end
-
--- Helper: process cloak and dagger
-local function processCloakAndDagger(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.cloakAndDagger then return end
-	local cd = hero.ActiveEffects.cloakAndDagger
-	if now >= cd.ExpireAt then
-		hero.ActiveEffects.cloakAndDagger = nil
-		hero.IsStealthed = false
-		-- Reset walk speed
-		local heroDef = HeroConfig[hero.HeroId]
-		if heroDef then
-			hero.Humanoid.WalkSpeed = heroDef.walkSpeed
-		end
-	else
-		-- Apply speed boost
-		local heroDef = HeroConfig[hero.HeroId]
-		if heroDef then
-			hero.Humanoid.WalkSpeed = heroDef.walkSpeed * (cd.MoveSpeedMultiplier or 1.0)
-		end
-	end
-end
-
--- Helper: process EMP disabled
-local function processEMP(hero, now)
-	if not hero.ActiveEffects or not hero.ActiveEffects.empDisabled then return end
-	if now >= hero.ActiveEffects.empDisabled.ExpireAt then
-		hero.ActiveEffects.empDisabled = nil
-	end
-end
-
--- Update XP and ultimate charge every frame
 task.spawn(function()
-	while true do
-		task.wait(0.25)
-
-		if MatchSystem.State == "ActiveMatch" or MatchSystem.State == "SuddenDeath" then
-			for _, hero in pairs(HeroSystem.HeroesByGuid) do
-				-- Overcharge effect
-				if hero.ActiveEffects and hero.ActiveEffects.overcharge then
-					local oc = hero.ActiveEffects.overcharge
-					if os.clock() >= oc.ExpireAt then
-						hero.ActiveEffects.overcharge = nil
-						local heroDef = HeroConfig[hero.HeroId]
-						if heroDef then
-							hero.Humanoid.WalkSpeed = heroDef.walkSpeed
-						end
-					else
-						-- Apply speed boost
-						local heroDef = HeroConfig[hero.HeroId]
-						if heroDef then
-							hero.Humanoid.WalkSpeed = heroDef.walkSpeed * oc.SpeedMultiplier
-						end
-					end
-				end
-
-				-- Fortify effect
-				if hero.ActiveEffects and hero.ActiveEffects.fortify then
-					if os.clock() >= hero.ActiveEffects.fortify.ExpireAt then
-						hero.ActiveEffects.fortify = nil
-					end
-				end
-
-				-- Heal over time
-				if hero.ActiveEffects and hero.ActiveEffects.healOverTime then
-					local hot = hero.ActiveEffects.healOverTime
-					if os.clock() >= hot.ExpireAt then
-						hero.ActiveEffects.healOverTime = nil
-					elseif os.clock() - hot.LastTick >= 1 then
-						hot.LastTick = os.clock()
-						AbilitySystem.Heal(hero, hot.HealPerTick)
-					end
-				end
-
-				-- Marked by Vesper Scope
-				if hero.ActiveEffects and hero.ActiveEffects.markedByVesper then
-					if os.clock() >= hero.MarkedUntil then
-						hero.ActiveEffects.markedByVesper = nil
-					end
-				end
-
-				-- Ultimate channel (legacy)
-				if hero.ActiveEffects and hero.ActiveEffects.ultimate then
-					local ult = hero.ActiveEffects.ultimate
-					if os.clock() >= ult.ExpireAt then
-						hero.ActiveEffects.ultimate = nil
-					elseif os.clock() - ult.LastShotAt >= (1 / ult.ShotsPerSecond) then
-						ult.LastShotAt = os.clock()
-						local dir = hero.Root.CFrame.LookVector
-						local spreadDir = Util.RandomVectorInCone(dir, ult.SpreadDegrees or 5)
-						local aimPoint = hero.Root.Position + spreadDir * (ult.Range or 500)
-						CombatSystem.FireWeapon(hero, aimPoint - hero.Root.Position)
-					end
-				end
-
-				-- Adrenaline effect (speed + fire rate)
-				if hero.ActiveEffects and hero.ActiveEffects.adrenaline then
-					local adr = hero.ActiveEffects.adrenaline
-					if os.clock() >= adr.ExpireAt then
-						hero.ActiveEffects.adrenaline = nil
-						local heroDef = HeroConfig[hero.HeroId]
-						if heroDef then hero.Humanoid.WalkSpeed = heroDef.walkSpeed end
-					end
-				end
-
-				-- Berserk effect
-				if hero.ActiveEffects and hero.ActiveEffects.berserk then
-					local bs = hero.ActiveEffects.berserk
-					if os.clock() >= bs.ExpireAt then
-						hero.ActiveEffects.berserk = nil
-					end
-				end
-
-				-- Burn damage over time
-				processBurn(hero, os.clock())
-
-				-- Freeze slow effect
-				processFreeze(hero, os.clock())
-
-				-- Supernova channel -> detonation
-				processSupernova(hero, os.clock())
-
-				-- Tether heal sharing
-				processTether(hero, os.clock())
-				processTetheredBy(hero, os.clock())
-
-				-- Phoenix dive landing check
-				processPhoenixDive(hero, os.clock())
-
-				-- Cloak and dagger speed
-				processCloakAndDagger(hero, os.clock())
-
-				-- EMP disabled
-				processEMP(hero, os.clock())
-
-				-- Smoke screen
-				processSmokeScreen(hero, os.clock())
-
-				-- Radar pulse
-				processRadarPulse(hero, os.clock())
-
-				-- Tactical overlay
-				processTacticalOverlay(hero, os.clock())
-
-				-- Hero power effect processing
-				local heroDef2 = HeroConfig[hero.HeroId]
-				if heroDef2 and heroDef2.powers then
-					for powerId, powerDef in pairs(heroDef2.powers) do
-						local powerKey = "power_" .. powerId
-						if hero.ActiveEffects and hero.ActiveEffects[powerKey] then
-							local pe = hero.ActiveEffects[powerKey]
-							if os.clock() >= pe.ExpireAt then
-								hero.ActiveEffects[powerKey] = nil
-							elseif os.clock() - pe.LastTick >= (powerDef.tickInterval or 1) then
-								pe.LastTick = os.clock()
-								-- Apply power effect
-								if powerId == "speedBoost" then
-									hero.Humanoid.WalkSpeed = heroDef2.walkSpeed * (powerDef.multiplier or 1.3)
-								elseif powerId == "damageResistance" then
-									-- Handled in ApplyDamage via ActiveEffects
-								elseif powerId == "wallHack" then
-									-- Handled client-side via ESP
-								elseif powerId == "teamHeal" then
-									-- Triggered heal pulse already
-								elseif powerId == "damageBoost" then
-									-- Apply damage multiplier on next hit
-								end
-							end
-						end
-					end
-				end
-
-				-- Regenerate ultimate charge slowly over time
-				if hero.UltimateCharge < hero.UltimateChargeMax then
-					hero.UltimateCharge = math.min(hero.UltimateChargeMax, hero.UltimateCharge + 0.05)
-				end
-			end
-		end
+	while task.wait(0.2) do
+		for _, player in ipairs(Players:GetPlayers()) do sendState(player) end
+		R.ScoreChanged:FireAllClients({Red = MatchSystem.Score.Red, Blue = MatchSystem.Score.Blue, coreDamage = MatchSystem.CoreDamage})
+		R.HeroStateSnapshot:FireAllClients({matchId = MatchSystem.MatchId, heroes = HeroSystem.GetSnapshot()})
+		R.ObjectiveStateChanged:FireAllClients({objectives = CombatSystem.GetObjectiveSnapshot()})
 	end
 end)
 
--- Update match state broadcasting and spawning
 task.spawn(function()
-	while true do
-		task.wait(0.2)
-		-- Fire matchStateChanged per-player so hasBomb is accurate
-		for _, plr in ipairs(Players:GetPlayers()) do
-			local ctrlHero = HeroSystem.GetControlledHero(plr)
-			local plrHasBomb = ctrlHero ~= nil and ctrlHero.HasBomb == true
-			matchStateChanged:FireClient(plr, {
-				state = MatchSystem.State,
-				timerRemaining = MatchSystem.Timer,
-				redScore = MatchSystem.Score.Red,
-				blueScore = MatchSystem.Score.Blue,
-				winner = MatchSystem.Winner,
-				gameMode = MatchSystem.GameMode,
-				kothHolder = MatchSystem.KOTHHolder,
-				roundNumber = MatchSystem.RoundNumber,
-				roundPhase = MatchSystem.RoundPhase,
-				bombState = MatchSystem.BombState,
-				bombTimer = MatchSystem.BombTimer,
-				roundScore = MatchSystem.RoundScore,
-				hasBomb = plrHasBomb,
-			})
-		end
-		scoreChanged:FireAllClients({
-			Red = MatchSystem.Score.Red,
-			Blue = MatchSystem.Score.Blue,
-			coreDamage = MatchSystem.CoreDamage,
-		})
-		heroStateSnapshot:FireAllClients({
-			matchId = MatchSystem.MatchId,
-			heroes = HeroSystem.GetSnapshot(),
-		})
-		objectiveStateChanged:FireAllClients({
-			objectives = CombatSystem.GetObjectiveSnapshot(),
-		})
-	end
-end)
-
--- Spawn heroes and start AI
-task.spawn(function()
-	while true do
-		task.wait(1)
-		if MatchSystem.State == "MatchCountdown" then
-			-- do nothing during countdown
-		elseif MatchSystem.State == "ActiveMatch" then
-			if not MatchSystem.SpawnedThisMatch then
-				MatchSystem.SpawnedThisMatch = true
-				for _, plr in ipairs(Players:GetPlayers()) do
-					local deck = MatchSystem.Decks[plr.UserId] or Config.DEFAULT_DECK
-					local teamId = MatchSystem.GetTeam(plr.UserId) or Config.TEAM_RED
-					HeroSystem.SpawnHeroesForOwner(plr.UserId, teamId, deck, plr)
-				end
-				if MatchSystem.BotActive then
-					local botDeck = Config.BOT_DECK
-					HeroSystem.SpawnHeroesForOwner(MatchSystem.BotOwnerId, Config.TEAM_BLUE, botDeck, nil)
-				end
-
--- Initialize AI system (once)
-			if not AISystem.Initialized then
-				AISystem.Init(HeroSystem, MatchSystem, CombatSystem, AbilitySystem)
-				AISystem.Initialized = true
+	while task.wait(0.5) do
+		if MatchSystem.State == "ActiveMatch" and not MatchSystem.SpawnedThisMatch then
+			MatchSystem.SpawnedThisMatch = true
+			for _, player in ipairs(Players:GetPlayers()) do
+				HeroSystem.SpawnHeroesForOwner(player.UserId, MatchSystem.GetTeam(player.UserId) or Config.TEAM_RED, MatchSystem.Decks[player.UserId] or Config.DEFAULT_DECK, player)
 			end
-
-			-- Enable AI for non-controlled heroes
-			for _, hero in pairs(HeroSystem.HeroesByGuid) do
-				if not hero.IsControlled then
-					AISystem.EnableHeroAI(hero, true)
-				end
-			end
-
-				-- Spawn pickups
-				for _, pos in ipairs(Config.MAP.POWERUP_SPAWNS) do
-					local types = {"Health", "Ammo", "Energy"}
-					local ptype = types[math.random(1, #types)]
-					CombatSystem.CreatePickup(ptype, pos)
-				end
-
-				-- Spawn armor stations
-				MapBuilder.AddArmorStations()
-
-				announcementEvent:FireAllClients({text = "⚔️ FIGHT! ⚔️", duration = 3})
-			end
-		elseif MatchSystem.State == "PostMatch" then
-			-- waiting for reset
-		elseif MatchSystem.State == "Resetting" then
+			if MatchSystem.BotActive then HeroSystem.SpawnHeroesForOwner(MatchSystem.BotOwnerId, Config.TEAM_BLUE, Config.BOT_DECK, nil) end
+			for _, hero in pairs(HeroSystem.HeroesByGuid) do if not hero.IsControlled then AISystem.EnableHeroAI(hero, true) end end
+			announce("FIGHT!", 2)
+		elseif MatchSystem.State == "Resetting" or (MatchSystem.State == "Lobby" and MatchSystem.NeedsWorldReset) then
 			HeroSystem.ClearAll()
+			AISystem.Clear()
+			AbilitySystem.Clear()
+			CombatSystem.Init()
+			MapBuilder.BuildNeonFoundry()
+			registerObjectives()
 			MatchSystem.SpawnedThisMatch = false
-			AISystem.Clear()
-			AbilitySystem.Clear()
-			MapBuilder.BuildNeonFoundry()
-			CombatSystem.Init()
-			local objectivesFolder = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Objectives")
-			for _, child in ipairs(objectivesFolder:GetChildren()) do
-				if child.Name == "RedCore" then
-					CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.CORE_MAX_HEALTH, "Core")
-				elseif child.Name == "BlueCore" then
-					CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.CORE_MAX_HEALTH, "Core")
-				elseif string.find(child.Name, "RedGenerator") then
-					CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.GENERATOR_MAX_HEALTH, "Generator")
-				elseif string.find(child.Name, "BlueGenerator") then
-					CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.GENERATOR_MAX_HEALTH, "Generator")
-				end
-			end
-			MatchSystem.NeedsWorldReset = false
-		elseif MatchSystem.State == "Lobby" and MatchSystem.NeedsWorldReset then
-			HeroSystem.ClearAll()
-			AISystem.Clear()
-			AbilitySystem.Clear()
-			CombatSystem.Init()
-			MapBuilder.BuildNeonFoundry()
-			local objectivesFolder = workspace:WaitForChild("PulseDeckArenaWorld"):WaitForChild("Objectives")
-			for _, child in ipairs(objectivesFolder:GetChildren()) do
-				if child.Name == "RedCore" then
-					CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.CORE_MAX_HEALTH, "Core")
-				elseif child.Name == "BlueCore" then
-					CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.CORE_MAX_HEALTH, "Core")
-				elseif string.find(child.Name, "RedGenerator") then
-					CombatSystem.RegisterObjective(child, Config.TEAM_RED, Config.GENERATOR_MAX_HEALTH, "Generator")
-				elseif string.find(child.Name, "BlueGenerator") then
-					CombatSystem.RegisterObjective(child, Config.TEAM_BLUE, Config.GENERATOR_MAX_HEALTH, "Generator")
-				end
-			end
 			MatchSystem.NeedsWorldReset = false
 		end
 	end
 end)
 
-print(Config.GAME_NAME .. " Stage 8 boot complete - All systems online")
+print(Config.GAME_NAME .. " authoritative runtime ready")
